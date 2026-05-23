@@ -1,0 +1,26 @@
+{
+  "Vehicle.Speed": {
+    "datatype": "float",
+    "description": "Vehicle speed as reported by the Powertrain ECU.",
+    "type": "sensor",
+    "unit": "km/h",
+    "min": 0,
+    "max": 250
+  },
+  "Vehicle.Battery.SoC": {
+    "datatype": "float",
+    "description": "High-voltage battery state of charge as a percentage of full capacity.",
+    "type": "sensor",
+    "unit": "percent",
+    "min": 0,
+    "max": 100
+  },
+  "Vehicle.Cabin.Temperature": {
+    "datatype": "float",
+    "description": "Current measured cabin air temperature.",
+    "type": "sensor",
+    "unit": "celsius",
+    "min": -40,
+    "max": 100
+  }
+}

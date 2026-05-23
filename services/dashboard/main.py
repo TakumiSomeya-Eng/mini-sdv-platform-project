@@ -1,0 +1,314 @@
+#!/usr/bin/env python3
+"""
+Vehicle Signal Dashboard — mini-sdv-platform  Milestone 1
+==========================================================
+A Streamlit dashboard that polls the Kuksa Databroker every second
+and displays live vehicle signals from three simulated ECUs.
+
+SDV Concept:
+  This dashboard represents the *consumer* side of the Vehicle
+  Abstraction Layer (VAL). In a real SDV platform, any application
+  that needs vehicle data — an instrument cluster, a fleet backend,
+  an AI safety monitor — connects to the central Databroker and reads
+  signals by VSS path. No application ever talks to an ECU directly.
+
+  This decoupling is the core architectural benefit of centralized
+  vehicle middleware: ECUs can be replaced, updated, or restarted
+  without changing any application code.
+
+Design decisions:
+  • Polling (get_current_values) over subscribe — Streamlit reruns the
+    entire script on each st.rerun(), making a persistent gRPC stream
+    hard to manage without threads. Polling is the right fit for M1.
+    True subscribe with ROS2 pub/sub is introduced in Milestone 3.
+  • st.session_state for history — 60-entry rolling buffer per signal.
+    No database needed; state survives Streamlit reruns within a session.
+  • New gRPC connection per poll — avoids threading complexity. The
+    overhead (~1 ms) is negligible at a 1-second poll interval.
+  • st.rerun() at the end — Streamlit's idiomatic pattern for a live
+    dashboard that auto-refreshes without user interaction.
+"""
+
+import logging
+import os
+import time
+from collections import deque
+
+import streamlit as st
+from kuksa_client.grpc import VSSClient
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+    level=logging.INFO,
+)
+log = logging.getLogger("dashboard")
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+DATABROKER_HOST  = os.environ.get("DATABROKER_HOST", "localhost")
+DATABROKER_PORT  = int(os.environ.get("DATABROKER_PORT", "55555"))
+REFRESH_INTERVAL = 1.0   # seconds between each Databroker poll
+HISTORY_MAX      = 60    # rolling window size (60 samples ≈ 60 s at 1 Hz)
+
+# ── Signal Metadata ───────────────────────────────────────────────────────────
+# Maps each VSS path to its display properties.
+# Keeping this as a dict (not hard-coded in the UI functions) means adding
+# a new signal in a future milestone only requires one entry here.
+SIGNALS: dict[str, dict] = {
+    "Vehicle.Speed": {
+        "label": "Vehicle Speed",
+        "unit": "km/h",
+        "ecu": "Powertrain ECU",
+        "format": "{:.1f}",
+        "chart_color": "#1f77b4",
+    },
+    "Vehicle.Battery.SoC": {
+        "label": "Battery State of Charge",
+        "unit": "%",
+        "ecu": "Battery Management System",
+        "format": "{:.2f}",
+        "chart_color": "#2ca02c",
+    },
+    "Vehicle.Cabin.Temperature": {
+        "label": "Cabin Temperature",
+        "unit": "°C",
+        "ecu": "HVAC Controller",
+        "format": "{:.1f}",
+        "chart_color": "#d62728",
+    },
+}
+
+SIGNAL_PATHS = list(SIGNALS.keys())
+
+
+# ── Session State ─────────────────────────────────────────────────────────────
+
+def init_session_state() -> None:
+    """
+    Initialise persistent session state on the very first Streamlit run.
+
+    st.session_state values survive st.rerun() within the same browser
+    session, giving us an in-memory signal history buffer without a database.
+    Each signal gets its own deque with a fixed maximum length — when full,
+    appending a new value automatically discards the oldest entry.
+    """
+    if "history" not in st.session_state:
+        st.session_state.history = {
+            path: deque(maxlen=HISTORY_MAX) for path in SIGNAL_PATHS
+        }
+    if "prev_values" not in st.session_state:
+        st.session_state.prev_values = {path: None for path in SIGNAL_PATHS}
+    if "connected" not in st.session_state:
+        st.session_state.connected = False
+
+
+# ── Databroker Poll ───────────────────────────────────────────────────────────
+
+def poll_databroker() -> dict[str, float | None]:
+    """
+    Open a short-lived gRPC connection to the Kuksa Databroker, read the
+    current value of all three signals, and return them.
+
+    Returns:
+        dict mapping VSS path → float value, or None if not yet published
+        or if the Databroker is unreachable.
+    """
+    values: dict[str, float | None] = {path: None for path in SIGNAL_PATHS}
+
+    try:
+        with VSSClient(DATABROKER_HOST, DATABROKER_PORT) as client:
+            response = client.get_current_values(SIGNAL_PATHS)
+
+        for path in SIGNAL_PATHS:
+            datapoint = response.get(path)
+            # A Datapoint with value=None means the signal is registered in
+            # the VSS catalog but has not been published yet (ECU sim not
+            # started, or first cycle not complete).
+            if datapoint is not None and datapoint.value is not None:
+                values[path] = float(datapoint.value)
+
+        st.session_state.connected = True
+        log.info(
+            "Poll → "
+            f"Speed={values['Vehicle.Speed']} km/h | "
+            f"SoC={values['Vehicle.Battery.SoC']} % | "
+            f"Temp={values['Vehicle.Cabin.Temperature']} °C"
+        )
+
+    except Exception as exc:
+        st.session_state.connected = False
+        log.warning(f"Databroker poll failed: {exc}")
+
+    return values
+
+
+# ── UI Components ─────────────────────────────────────────────────────────────
+
+def render_header() -> None:
+    """Title bar with Databroker connection status."""
+    col_title, col_status = st.columns([5, 1])
+
+    with col_title:
+        st.title("mini-SDV Platform")
+        st.caption("Milestone 1 · ECU Simulator → Kuksa Databroker → Dashboard")
+
+    with col_status:
+        st.write("")  # push the badge down to align with the title
+        if st.session_state.connected:
+            st.success("● Connected")
+        else:
+            st.error("○ Disconnected")
+
+
+def render_metrics(values: dict[str, float | None]) -> None:
+    """
+    One metric card per signal showing the current value and delta.
+
+    Delta = difference from the previous poll reading.
+    A positive delta on Speed means the vehicle is accelerating;
+    a negative delta on SoC means the battery is discharging.
+    This mirrors the delta concept used in automotive telemetry displays.
+    """
+    cols = st.columns(len(SIGNAL_PATHS))
+
+    for col, path in zip(cols, SIGNAL_PATHS):
+        meta = SIGNALS[path]
+        current = values[path]
+        previous = st.session_state.prev_values[path]
+
+        with col:
+            if current is None:
+                st.metric(
+                    label=f"{meta['label']}  ({meta['unit']})",
+                    value="—",
+                    help=f"VSS path: {path}\nSource: {meta['ecu']}\nNo data yet.",
+                )
+            else:
+                delta_str = None
+                if previous is not None:
+                    delta = round(current - previous, 3)
+                    delta_str = f"{delta:+.2f} {meta['unit']}"
+
+                st.metric(
+                    label=f"{meta['label']}  ({meta['unit']})",
+                    value=meta["format"].format(current),
+                    delta=delta_str,
+                    help=f"VSS path: {path}\nSource ECU: {meta['ecu']}",
+                )
+
+
+def render_charts() -> None:
+    """
+    Rolling 60-second line chart for each signal.
+
+    The chart shows the last HISTORY_MAX readings (60 samples = 60 seconds
+    at a 1 Hz poll rate). This gives a short-term trend view — useful for
+    spotting oscillations, drift, or anomalies in vehicle signals.
+
+    In a real SDV cloud backend, this role would be filled by InfluxDB +
+    Grafana or a cloud time-series store. For M1 the in-memory deque is
+    sufficient and avoids adding a database service.
+    """
+    for path in SIGNAL_PATHS:
+        meta = SIGNALS[path]
+        history = list(st.session_state.history[path])
+
+        st.subheader(f"{meta['label']}")
+        st.caption(
+            f"VSS path: `{path}` · Source: {meta['ecu']} · "
+            f"Last {HISTORY_MAX} readings"
+        )
+
+        if not history:
+            st.info("Waiting for signal data from ECU simulator…")
+        else:
+            # Pass a dict so the series label matches the unit name.
+            # st.line_chart renders the dict key as the legend entry.
+            st.line_chart(
+                {meta["unit"]: history},
+                height=160,
+                use_container_width=True,
+            )
+
+        st.divider()
+
+
+def render_sidebar() -> None:
+    """
+    Educational sidebar explaining the SDV architecture visible in this demo.
+    """
+    with st.sidebar:
+        st.header("SDV Architecture")
+        st.markdown(f"""
+**Signal Flow (this demo)**
+```
+Powertrain ECU ──┐
+Battery Mgmt Sys ┼──▶ Kuksa      ──▶ This
+HVAC Controller ─┘    Databroker      Dashboard
+      ↑                    ↑
+   (gRPC)              (gRPC)
+```
+
+**Real-World Equivalent**
+| Simulation | Production SDV |
+|---|---|
+| ECU Simulator | Physical ECU on CAN bus |
+| gRPC publish | CAN frame → Gateway → gRPC |
+| Kuksa Databroker | Central Vehicle Computer |
+| Dashboard | HMI / Cloud Backend |
+
+**Protocol:** gRPC (Kuksa VAL API)
+**Signal Standard:** COVESA VSS
+        """)
+
+        st.divider()
+        st.caption(f"Databroker: `{DATABROKER_HOST}:{DATABROKER_PORT}`")
+        st.caption(f"Poll interval: {REFRESH_INTERVAL} s")
+        st.caption(f"History window: {HISTORY_MAX} samples")
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    st.set_page_config(
+        page_title="mini-SDV Platform",
+        page_icon="🚗",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+
+    init_session_state()
+
+    render_header()
+    st.divider()
+
+    # ── Poll current values from Databroker ──────────────────────────────────
+    values = poll_databroker()
+
+    # Append to rolling history buffers (None values are skipped so the chart
+    # does not display gaps when the ECU sim hasn't published yet)
+    for path in SIGNAL_PATHS:
+        if values[path] is not None:
+            st.session_state.history[path].append(values[path])
+
+    # ── Render UI ────────────────────────────────────────────────────────────
+    render_metrics(values)
+    st.divider()
+    render_charts()
+    render_sidebar()
+
+    # Update previous values for delta calculation in the next cycle
+    for path in SIGNAL_PATHS:
+        if values[path] is not None:
+            st.session_state.prev_values[path] = values[path]
+
+    # ── Schedule next refresh ────────────────────────────────────────────────
+    # time.sleep + st.rerun() is the idiomatic Streamlit pattern for a live
+    # dashboard. The sleep keeps the UI responsive and the poll rate bounded.
+    time.sleep(REFRESH_INTERVAL)
+    st.rerun()
+
+
+if __name__ == "__main__":
+    main()

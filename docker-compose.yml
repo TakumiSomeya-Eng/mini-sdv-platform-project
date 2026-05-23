@@ -1,0 +1,126 @@
+# mini-sdv-platform — Milestone 1: Live Vehicle Signal Dashboard
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# SDV Architecture Simulation:
+#
+#   Real vehicle:  ECUs (CAN bus) → Central Gateway → Vehicle Middleware → Apps
+#   This file:     ECU Simulator  → Kuksa Databroker → Streamlit Dashboard
+#
+# All services communicate over the internal Docker bridge network "sdv-net".
+# Only the dashboard port (8501) is exposed to the host machine.
+#
+# Usage:
+#   Start:   docker compose up
+#   Stop:    docker compose down
+#   Logs:    docker compose logs -f
+#   Rebuild: docker compose build --no-cache
+
+services:
+
+  # ── Service 1: Kuksa Databroker ─────────────────────────────────────────────
+  #
+  # The central vehicle middleware — the single source of truth for all signal
+  # state in the simulated vehicle.
+  #
+  # SDV Concept:
+  #   In production SDV platforms (e.g., Volkswagen CARIAD E3, Bosch SDV),
+  #   the Databroker role is filled by a "Vehicle Abstraction Layer" (VAL)
+  #   running on the Central Vehicle Computer (CVC). All ECU data flows
+  #   through it. No application talks directly to an ECU.
+  #
+  # Eclipse Kuksa is an open-source implementation of this pattern, used by
+  # COVESA member companies. It exposes a gRPC API conforming to the
+  # Vehicle Signal Specification (VSS) naming standard.
+  databroker:
+    image: ghcr.io/eclipse/kuksa.val/databroker:0.4.4
+    command: ["--vss", "/vss.json", "--insecure"]
+    volumes:
+      # Mount our custom VSS catalog in COVESA hierarchical format.
+      # :ro = read-only; the catalog is immutable at runtime (signals are
+      # defined at design time, not discovered dynamically in M1).
+      - ./config/vss/vss_mini_covesa.json:/vss.json:ro
+    networks:
+      - sdv-net
+    # Health check: confirm the gRPC port accepts connections before
+    # dependent services attempt to connect.
+    # Note: Uses bash /dev/tcp — requires a debian-based base image.
+    # If this fails in your environment, the ECU simulator's reconnect
+    # loop (exponential back-off) provides equivalent resilience.
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c 'cat < /dev/null > /dev/tcp/localhost/55555' 2>/dev/null && echo healthy || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: on-failure
+
+  # ── Service 2: ECU Simulator ────────────────────────────────────────────────
+  #
+  # Simulates three Electronic Control Units publishing vehicle signals.
+  #
+  # SDV Concept:
+  #   In a real vehicle, each ECU is dedicated hardware (e.g., a Renesas R-Car
+  #   or NXP S32 microcontroller) communicating over ISO 11898 CAN bus.
+  #   A Central Gateway ECU translates CAN frames into gRPC calls for the
+  #   Databroker. This simulator skips the CAN layer (added in Milestone 4)
+  #   and publishes directly via gRPC — the same protocol the real gateway uses.
+  #
+  # Simulated ECUs:
+  #   Powertrain ECU    → Vehicle.Speed             (km/h)
+  #   Battery Mgmt Sys  → Vehicle.Battery.SoC       (%)
+  #   HVAC Controller   → Vehicle.Cabin.Temperature (°C)
+  ecu-simulator:
+    build:
+      context: ./services/ecu-simulator
+      dockerfile: Dockerfile
+    environment:
+      DATABROKER_HOST: databroker    # Docker DNS name — resolves on sdv-net
+      DATABROKER_PORT: "55555"       # Kuksa gRPC port
+      UPDATE_INTERVAL_SEC: "1.0"    # Signal publish interval (seconds)
+    depends_on:
+      databroker:
+        condition: service_healthy   # Wait for Databroker TCP probe to pass
+    networks:
+      - sdv-net
+    restart: on-failure
+
+  # ── Service 3: Streamlit Dashboard ─────────────────────────────────────────
+  #
+  # A live browser dashboard that reads and visualises vehicle signals.
+  #
+  # SDV Concept:
+  #   This represents the consumer side of the Vehicle Abstraction Layer.
+  #   In a real SDV, this role is played by:
+  #     - The instrument cluster / HMI app (reading Speed, Cabin Temp)
+  #     - A fleet telematics backend (reading all signals over MQTT/cloud)
+  #     - An AI monitoring agent (reading anomalies in Battery SoC)
+  #   All of these connect to the Databroker, not to individual ECUs.
+  #
+  # Access: http://localhost:8501
+  dashboard:
+    build:
+      context: ./services/dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "8501:8501"                  # Only this port is exposed to the host
+    environment:
+      DATABROKER_HOST: databroker
+      DATABROKER_PORT: "55555"
+    depends_on:
+      databroker:
+        condition: service_healthy
+    networks:
+      - sdv-net
+    restart: on-failure
+
+# ── Network ─────────────────────────────────────────────────────────────────
+# All services share one internal bridge network.
+# Services reference each other by service name (Docker internal DNS).
+# No cross-service port is exposed to the host machine except :8501.
+#
+# SDV Concept:
+#   Analogous to a private in-vehicle Ethernet segment (SOME/IP / DDS domain)
+#   that isolates vehicle services from the external network.
+networks:
+  sdv-net:
+    driver: bridge

@@ -1,0 +1,44 @@
+{
+  "Vehicle": {
+    "type": "branch",
+    "description": "Top-level vehicle branch — root of the Vehicle Signal Specification (VSS) tree.",
+    "children": {
+      "Speed": {
+        "datatype": "float",
+        "type": "sensor",
+        "unit": "km/h",
+        "min": 0,
+        "max": 250,
+        "description": "Vehicle speed as reported by the Powertrain ECU via wheel speed sensors. Equivalent to VSS Vehicle.Speed in COVESA v3.x."
+      },
+      "Battery": {
+        "type": "branch",
+        "description": "High-voltage traction battery branch. In a real EV, all signals here originate from the Battery Management System (BMS) ECU.",
+        "children": {
+          "SoC": {
+            "datatype": "float",
+            "type": "sensor",
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "description": "State of Charge — remaining capacity as a percentage of full. Reported by the Battery Management System (BMS). Note: standard COVESA VSS 4.x path is Vehicle.Powertrain.TractionBattery.StateOfCharge.Current — simplified here for Milestone 1 clarity."
+          }
+        }
+      },
+      "Cabin": {
+        "type": "branch",
+        "description": "Signals related to the passenger cabin environment. Sources: HVAC Controller, interior sensor nodes.",
+        "children": {
+          "Temperature": {
+            "datatype": "float",
+            "type": "sensor",
+            "unit": "celsius",
+            "min": -40,
+            "max": 100,
+            "description": "Current measured cabin air temperature. Reported by the HVAC Controller via an interior NTC thermistor."
+          }
+        }
+      }
+    }
+  }
+}
