@@ -1,0 +1,2 @@
+# No additional dependencies.
+# rclpy and std_msgs are pre-installed in the ros:jazzy-ros-base image.

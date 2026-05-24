@@ -58,7 +58,7 @@ MQTT_HOST  = os.environ.get("MQTT_HOST", "mosquitto")
 MQTT_PORT  = int(os.environ.get("MQTT_PORT", "1883"))
 VEHICLE_ID = os.environ.get("VEHICLE_ID", "vehicle-001")
 
-# ── Signal Metadata ───────────────────────────────────────────────────────────
+# ── Signal Metadata (COVESA VSS 4.x standard paths — migrated in M3) ─────────
 # Maps each VSS path to its display properties.
 # Keeping this as a dict (not hard-coded in the UI functions) means adding
 # a new signal in a future milestone only requires one entry here.
@@ -70,14 +70,14 @@ SIGNALS: dict[str, dict] = {
         "format": "{:.1f}",
         "chart_color": "#1f77b4",
     },
-    "Vehicle.Battery.SoC": {
+    "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current": {
         "label": "Battery State of Charge",
         "unit": "%",
         "ecu": "Battery Management System",
         "format": "{:.2f}",
         "chart_color": "#2ca02c",
     },
-    "Vehicle.Cabin.Temperature": {
+    "Vehicle.Cabin.HVAC.AmbientAirTemperature": {
         "label": "Cabin Temperature",
         "unit": "°C",
         "ecu": "HVAC Controller",
@@ -337,3 +337,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+                                               

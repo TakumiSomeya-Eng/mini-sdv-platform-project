@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
 """
-ECU Simulator — mini-sdv-platform  Milestone 1
-===============================================
+ECU Simulator — mini-sdv-platform  Milestone 1 (updated M3)
+=============================================================
 Simulates three vehicle Electronic Control Units (ECUs):
 
-  ECU                   Signal                   Unit
-  ─────────────────     ────────────────────────  ─────
-  Powertrain ECU     →  Vehicle.Speed             km/h
-  Battery Mgmt Sys   →  Vehicle.Battery.SoC       %
-  HVAC Controller    →  Vehicle.Cabin.Temperature  °C
+  ECU                   Signal (COVESA VSS 4.x standard path)                              Unit
+  ─────────────────     ──────────────────────────────────────────────────────────────────  ─────
+  Powertrain ECU     →  Vehicle.Speed                                                       km/h
+  Battery Mgmt Sys   →  Vehicle.Powertrain.TractionBattery.StateOfCharge.Current            %
+  HVAC Controller    →  Vehicle.Cabin.HVAC.AmbientAirTemperature                            °C
+
+Milestone 3 change: VSS signal paths migrated to COVESA VSS 4.x standard paths.
+  Vehicle.Battery.SoC       → Vehicle.Powertrain.TractionBattery.StateOfCharge.Current
+  Vehicle.Cabin.Temperature → Vehicle.Cabin.HVAC.AmbientAirTemperature
 
 SDV concept:
   In a real vehicle, ECUs communicate over CAN bus (ISO 11898).
   A central gateway ECU reads those CAN frames and forwards them
   to the in-vehicle middleware (here: Kuksa Databroker) via gRPC.
   This simulator replaces the physical bus + gateway by writing
-  directly to the Databroker — Milestone 2 adds SocketCAN.
+  directly to the Databroker — Milestone 4 adds SocketCAN.
 
 Design decisions:
   • Single Python process — keeps M1 simple; real ECUs are separate hardware.
@@ -45,14 +49,14 @@ DATABROKER_HOST  = os.environ.get("DATABROKER_HOST", "localhost")
 DATABROKER_PORT  = int(os.environ.get("DATABROKER_PORT", "55555"))
 UPDATE_INTERVAL  = float(os.environ.get("UPDATE_INTERVAL_SEC", "1.0"))
 
-# ── VSS Signal Paths ──────────────────────────────────────────────────────────
+# ── VSS Signal Paths (COVESA VSS 4.x standard — migrated in M3) ──────────────
 # VSS (Vehicle Signal Specification) defines a standardised, hierarchical
 # naming tree for all vehicle data.  Using a shared catalog lets any app or
 # service discover and subscribe to signals without prior negotiation.
-# Paths here must match config/vss/vss_mini.json mounted into the Databroker.
-SIGNAL_SPEED = "Vehicle.Speed"             # km/h  — Powertrain ECU
-SIGNAL_SOC   = "Vehicle.Battery.SoC"       # %     — Battery Management System
-SIGNAL_TEMP  = "Vehicle.Cabin.Temperature" # °C    — HVAC Controller
+# Paths here must match config/vss/vss_mini_covesa.json mounted into the Databroker.
+SIGNAL_SPEED = "Vehicle.Speed"                                             # km/h — Powertrain ECU
+SIGNAL_SOC   = "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current" # %    — Battery Management System
+SIGNAL_TEMP  = "Vehicle.Cabin.HVAC.AmbientAirTemperature"                 # °C   — HVAC Controller
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -161,22 +165,3 @@ def run(vehicle: VehicleState) -> None:
             log.warning(f"Connection error: {exc}")
             log.info(f"Retrying in {retry_delay:.0f} s …")
             time.sleep(retry_delay)
-            retry_delay = min(retry_delay * 2, 30.0)  # exponential back-off, cap 30 s
-
-
-def main() -> None:
-    log.info("=" * 60)
-    log.info("  mini-SDV Platform — ECU Simulator  (Milestone 1)")
-    log.info(f"  Databroker  : {DATABROKER_HOST}:{DATABROKER_PORT}")
-    log.info(f"  Interval    : {UPDATE_INTERVAL} s")
-    log.info(f"  Signals     : {SIGNAL_SPEED}")
-    log.info(f"              : {SIGNAL_SOC}")
-    log.info(f"              : {SIGNAL_TEMP}")
-    log.info("=" * 60)
-
-    vehicle = VehicleState()
-    run(vehicle)
-
-
-if __name__ == "__main__":
-    main()

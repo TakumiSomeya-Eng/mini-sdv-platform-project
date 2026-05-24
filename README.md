@@ -30,45 +30,56 @@ This project simulates that architecture using Eclipse Kuksa as the VAL.
 
 ---
 
-## Current Architecture (Milestone 2)
+## Current Architecture (Milestone 3)
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                    Docker Compose: sdv-net                        │
-│                                                                  │
-│  ┌─────────────────────┐   gRPC SetCurrentValues                 │
-│  │   ecu-simulator     │──────────────────────────┐             │
-│  │  Powertrain ECU     │                          │             │
-│  │  Battery Mgmt Sys   │                          ▼             │
-│  │  HVAC Controller    │            ┌─────────────────────────┐ │
-│  └─────────────────────┘            │   kuksa-databroker      │ │
-│           ↑ 1 s interval            │   :55555 (gRPC)         │ │
-│    VehicleState physics sim         │                         │ │
-│                                     │  • Vehicle.Speed        │ │
-│                                     │  • Vehicle.Battery.SoC  │ │
-│                                     │  • Vehicle.Cabin.Temp   │ │
-│                                     └─────────────────────────┘ │
-│                                        │              │          │
-│                               gRPC Get │    gRPC      │ Subscribe│
-│                               (poll)   │    (stream)  │          │
-│                                        ▼              ▼          │
-│                          ┌──────────────┐  ┌───────────────────┐ │
-│                          │  dashboard   │  │   mqtt-bridge     │ │
-│                          │  :8501       │  │                   │ │
-│                          │  [M1 charts] │  │ MQTT publish      │ │
-│                          └──────────────┘  └───────────────────┘ │
-│                                                      │           │
-│                                              MQTT :1883          │
-│                                                      ▼           │
-│                                           ┌────────────────────┐ │
-│                                           │   mosquitto        │ │
-│                                           │   :1883            │ │
-│                                           └────────────────────┘ │
-└───────────────────────────────────────────────────┬──────────────┘
-         http://localhost:8501  (dashboard)          │ :1883 (MQTT)
-                                                     ▼
-                                        mosquitto_sub (host CLI)
+┌──────────────────────────────────────────────────────────────────────┐
+│                      Docker Compose: sdv-net                          │
+│                                                                      │
+│  ┌─────────────────────┐   gRPC SetCurrentValues                     │
+│  │   ecu-simulator     │──────────────────────────┐                 │
+│  │  Powertrain ECU     │                          │                 │
+│  │  Battery Mgmt Sys   │                          ▼                 │
+│  │  HVAC Controller    │          ┌───────────────────────────────┐ │
+│  └─────────────────────┘          │      kuksa-databroker         │ │
+│           ↑ 1 s interval          │      :55555 (gRPC)            │ │
+│    VehicleState physics sim       │                               │ │
+│                                   │  • Vehicle.Speed              │ │
+│                                   │  • Vehicle.Powertrain         │ │
+│                                   │    .TractionBattery           │ │
+│                                   │    .StateOfCharge.Current     │ │
+│                                   │  • Vehicle.Cabin.HVAC         │ │
+│                                   │    .AmbientAirTemperature     │ │
+│                                   └───────────────────────────────┘ │
+│                                      │          │           │        │
+│                             gRPC Get │ gRPC     │ Subscribe │        │
+│                             (poll)   │ (stream) │           │        │
+│                                      ▼          ▼           ▼        │
+│                        ┌──────────┐  ┌─────���────────┐  ┌──────────┐ │
+│                        │dashboard │  │ mqtt-bridge  │  │ros2-bridge│ │
+│                        │  :8501   │  │ MQTT publish │  │DDS publish│ │
+│                        └──────────┘  └──────────────┘  └──────────┘ │
+│                                             │                │        │
+│                                       MQTT :1883        DDS (sdv-net)│
+│                                             ▼                ▼        │
+│                                      ┌────────��─┐  ┌───────────────┐ │
+│                                      │mosquitto │  │ros2-subscriber│ │
+│                                      │  :1883   │  │ (test/verify) │ │
+│                                      └──────────┘  └───────────────┘ │
+└──────────────────────────────────┬───────────────────────────────────┘
+       http://localhost:8501        │ :1883 (MQTT)
+                                    ▼
+                       mosquitto_sub (host CLI)
 ```
+
+**Three-consumer pattern — the M3 milestone:**
+One Databroker, three consumers, three protocol paradigms:
+
+| Consumer | Protocol | Use case |
+|---|---|---|
+| `dashboard` | gRPC poll | Human UI (instrument cluster) |
+| `mqtt-bridge` | gRPC subscribe → MQTT | Cloud telemetry (AWS IoT / Azure IoT) |
+| `ros2-bridge` | gRPC subscribe → DDS | Autonomous driving stack (Autoware) |
 
 ---
 
@@ -108,6 +119,36 @@ docker compose up
 
 ---
 
+## Quick Test for Milestone 3 (ROS2 Integration)
+
+After `docker compose up`, verify the ROS2 pipeline via Docker logs — no host ROS2 installation required:
+
+```bash
+# Watch the ROS2 bridge forwarding signals to DDS topics
+docker compose logs -f ros2-bridge
+```
+
+Expected output:
+```
+2026-05-24T10:00:01 [INFO    ] ros2-bridge: Published /vehicle/speed = 87.3 km/h
+2026-05-24T10:00:01 [INFO    ] ros2-bridge: Published /vehicle/battery/soc = 72.4 percent
+2026-05-24T10:00:01 [INFO    ] ros2-bridge: Published /vehicle/cabin/temperature = 22.1 celsius
+```
+
+```bash
+# Watch the ROS2 subscriber receiving DDS messages
+docker compose logs -f ros2-subscriber
+```
+
+Expected output:
+```
+[/vehicle/speed] value=87.3
+[/vehicle/battery/soc] value=72.4
+[/vehicle/cabin/temperature] value=22.1
+```
+
+---
+
 ## Quick Test for Milestone 2 (MQTT Cloud Bridge)
 
 After `docker compose up`, open a second terminal on your host machine:
@@ -117,11 +158,11 @@ After `docker compose up`, open a second terminal on your host machine:
 mosquitto_sub -h localhost -p 1883 -t "sdv/vehicle-001/#" -v
 ```
 
-Expected output (1 Hz per signal):
+Expected output (1 Hz per signal, COVESA VSS 4.x paths):
 ```
-sdv/vehicle-001/Vehicle/Speed {"signal": "Vehicle.Speed", "value": 87.3, "unit": "km/h", "timestamp": "2026-05-23T14:30:01"}
-sdv/vehicle-001/Vehicle/Battery/SoC {"signal": "Vehicle.Battery.SoC", "value": 72.4, "unit": "percent", "timestamp": "2026-05-23T14:30:01"}
-sdv/vehicle-001/Vehicle/Cabin/Temperature {"signal": "Vehicle.Cabin.Temperature", "value": 22.1, "unit": "celsius", "timestamp": "2026-05-23T14:30:01"}
+sdv/vehicle-001/Vehicle/Speed {"signal": "Vehicle.Speed", "value": 87.3, "unit": "km/h", "timestamp": "..."}
+sdv/vehicle-001/Vehicle/Powertrain/TractionBattery/StateOfCharge/Current {"signal": "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current", "value": 72.4, "unit": "percent", "timestamp": "..."}
+sdv/vehicle-001/Vehicle/Cabin/HVAC/AmbientAirTemperature {"signal": "Vehicle.Cabin.HVAC.AmbientAirTemperature", "value": 22.1, "unit": "celsius", "timestamp": "..."}
 ```
 
 > **No `mosquitto_sub` installed?** On Ubuntu: `sudo apt install mosquitto-clients` · On macOS: `brew install mosquitto`
@@ -259,10 +300,13 @@ docker compose logs -f ecu-simulator
 ```
 
 **Add a new signal (conceptual steps):**
-1. Add the signal to `config/vss/vss_mini_covesa.json`
-2. Add simulation logic in `services/ecu-simulator/main.py`
-3. Add the signal path to the `SIGNALS` dict in `services/dashboard/main.py`
-4. `docker compose build && docker compose up`
+1. Add the signal to `config/vss/vss_mini_covesa.json` (COVESA hierarchical format)
+2. Add the entry to `config/vss/vss_mini.json` (flat reference)
+3. Add simulation logic in `services/ecu-simulator/main.py`
+4. Add an entry to the `SIGNALS` dict in `services/dashboard/main.py`
+5. Add an entry to the `SIGNALS` dict in `services/mqtt-bridge/main.py`
+6. Add an entry to `SIGNAL_MAP` in `services/ros2-bridge/main.py`
+7. `docker compose build && docker compose up`
 
 ---
 
@@ -270,10 +314,12 @@ docker compose logs -f ecu-simulator
 
 ```
 mini-sdv-platform/
-├── docker-compose.yml                  ← orchestrates all services
+├── docker-compose.yml                  ← orchestrates all 7 services
 ├── README.md                           ← this file
 │
 ├── config/
+│   ├── mosquitto/
+│   │   └── mosquitto.conf              ← Mosquitto MQTT broker config
 │   └── vss/
 │       ├── vss_mini_covesa.json        ← VSS catalog (COVESA format, loaded by Databroker)
 │       └── vss_mini.json              ← VSS catalog (flat format, human-readable reference)
@@ -283,49 +329,11 @@ mini-sdv-platform/
 │   │   ├── Dockerfile
 │   │   ├── main.py                     ← ECU simulation logic + gRPC publisher
 │   │   └── requirements.txt
-│   └── dashboard/
-│       ├── Dockerfile
-│       ├── main.py                     ← Streamlit dashboard
-│       └── requirements.txt
-│
-└── docs/
-    ├── templates/                      ← Hypothesis Hierarchy Model templates
-    └── milestone-1/
-        ├── PRD.md                      ← Product Requirements (Value + Behavior hypotheses)
-        ├── FRD.md                      ← Functional Requirements (Domain + Interaction)
-        └── TRD.md                      ← Technical Requirements (Implementation hypothesis)
-```
-
----
-
-## Milestone Roadmap
-
-| Milestone | Goal | New Services | New Concepts |
-|---|---|---|---|
-| **M1** ✅ | Live vehicle signal dashboard | Kuksa Databroker, ECU Simulator, Dashboard | VSS, gRPC, centralized middleware |
-| **M2** ✅ | Cloud connectivity | MQTT Broker, MQTT Bridge | MQTT, V2C telemetry, subscribe vs. poll |
-| **M3** | ROS2 integration | ROS2 node | DDS, topic-based pub/sub, sensor fusion |
-| **M4** | Virtual CAN bus | SocketCAN ECUs | ISO 11898, CAN frames, Gateway ECU pattern |
-| **M5** | AI agent | LLM-based orchestrator | Intelligent actuation, anomaly detection |
-
----
-
-## Key SDV Concepts Demonstrated in M1
-
-**Vehicle Signal Specification (VSS)**
-A COVESA-maintained hierarchical naming standard for all vehicle data. Using VSS means any tool or service that understands VSS can consume your signals without custom integration.
-
-**Centralized Vehicle Middleware**
-The Databroker acts as a pub/sub hub for the entire vehicle. ECUs write; apps read. This enables over-the-air (OTA) updates to individual services without touching the hardware layer.
-
-**Service-Oriented Architecture in Vehicles**
-Each service (ECU sim, Databroker, Dashboard) is an independent container. In a real SDV, these would be independent software components deployed on the Central Vehicle Computer, each with its own lifecycle.
-
-**Exponential Back-off Reconnect**
-The ECU simulator's reconnect loop mirrors how cloud-native vehicle services handle transient middleware restarts — without crashing and relying on the container orchestrator as the only recovery mechanism.
-
----
-
-## License
-
-MIT — built for learning. Fork it, break it, extend it.
+│   ├── dashboard/
+│   │   ├── Dockerfile
+│   │   ├── main.py                     ← Streamlit dashboard
+│   │   └── requirements.txt
+│   ├── mqtt-bridge/
+│   │   ├── Dockerfile
+│   │   ├── main.py                     ← Kuksa → MQTT forwarder
+│   �

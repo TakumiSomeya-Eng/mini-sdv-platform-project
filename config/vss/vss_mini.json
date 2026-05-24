@@ -7,20 +7,12 @@
     "min": 0,
     "max": 250
   },
-  "Vehicle.Battery.SoC": {
+  "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current": {
     "datatype": "float",
-    "description": "High-voltage battery state of charge as a percentage of full capacity.",
+    "description": "Current state of charge of the high-voltage traction battery, as a percentage of full capacity. Reported by the Battery Management System (BMS). COVESA VSS 4.x standard path (migrated from Vehicle.Battery.SoC in M1/M2).",
     "type": "sensor",
     "unit": "percent",
     "min": 0,
     "max": 100
   },
-  "Vehicle.Cabin.Temperature": {
-    "datatype": "float",
-    "description": "Current measured cabin air temperature.",
-    "type": "sensor",
-    "unit": "celsius",
-    "min": -40,
-    "max": 100
-  }
-}
+  "Vehicle.Cabin

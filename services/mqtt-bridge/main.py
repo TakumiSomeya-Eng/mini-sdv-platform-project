@@ -30,13 +30,13 @@ Key design decision — subscribe vs. poll:
 MQTT Topic structure:
   sdv/{vehicle_id}/{VSS_path_with_slashes}
 
-  Examples:
+  Examples (COVESA VSS 4.x standard paths — updated in M3):
     sdv/vehicle-001/Vehicle/Speed
-    sdv/vehicle-001/Vehicle/Battery/SoC
-    sdv/vehicle-001/Vehicle/Cabin/Temperature
+    sdv/vehicle-001/Vehicle/Powertrain/TractionBattery/StateOfCharge/Current
+    sdv/vehicle-001/Vehicle/Cabin/HVAC/AmbientAirTemperature
 
   Wildcard subscriptions (from a cloud subscriber):
-    sdv/vehicle-001/#           → all signals from this vehicle
+    sdv/vehicle-001/#           → all signals from this vehicle (unchanged)
     sdv/+/Vehicle/Speed         → Speed from any vehicle in the fleet
 """
 
@@ -64,14 +64,21 @@ MQTT_HOST       = os.environ.get("MQTT_HOST", "localhost")
 MQTT_PORT       = int(os.environ.get("MQTT_PORT", "1883"))
 VEHICLE_ID      = os.environ.get("VEHICLE_ID", "vehicle-001")
 
-# ── Signal metadata ───────────────────────────────────────────────────────────
+# ── Signal metadata (COVESA VSS 4.x standard paths — migrated in M3) ─────────
 # Unit strings match the VSS catalog definitions in vss_mini_covesa.json.
 # Keeping unit metadata here (not fetching from Databroker) avoids an extra
 # RPC call and makes the payload self-contained for cloud consumers.
+#
+# MQTT topic change from M2 → M3 (dot-to-slash conversion of new paths):
+#   Vehicle.Powertrain.TractionBattery.StateOfCharge.Current
+#     → sdv/vehicle-001/Vehicle/Powertrain/TractionBattery/StateOfCharge/Current
+#   Vehicle.Cabin.HVAC.AmbientAirTemperature
+#     → sdv/vehicle-001/Vehicle/Cabin/HVAC/AmbientAirTemperature
+#   Wildcard sdv/vehicle-001/# continues to capture all signals unchanged.
 SIGNALS: dict[str, dict] = {
-    "Vehicle.Speed":             {"unit": "km/h"},
-    "Vehicle.Battery.SoC":       {"unit": "percent"},
-    "Vehicle.Cabin.Temperature": {"unit": "celsius"},
+    "Vehicle.Speed":                                                    {"unit": "km/h"},
+    "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current":        {"unit": "percent"},
+    "Vehicle.Cabin.HVAC.AmbientAirTemperature":                        {"unit": "celsius"},
 }
 
 SIGNAL_PATHS = list(SIGNALS.keys())
@@ -233,18 +240,4 @@ def run() -> None:
 def main() -> None:
     log.info("=" * 60)
     log.info("  mini-SDV Platform — MQTT Bridge  (Milestone 2)")
-    log.info(f"  Databroker : {DATABROKER_HOST}:{DATABROKER_PORT}")
-    log.info(f"  MQTT       : {MQTT_HOST}:{MQTT_PORT}")
-    log.info(f"  Vehicle ID : {VEHICLE_ID}")
-    log.info(f"  Topics     : sdv/{VEHICLE_ID}/Vehicle/Speed")
-    log.info(f"             : sdv/{VEHICLE_ID}/Vehicle/Battery/SoC")
-    log.info(f"             : sdv/{VEHICLE_ID}/Vehicle/Cabin/Temperature")
-    log.info("  Subscribe  : mosquitto_sub -h localhost "
-             f"-p {MQTT_PORT} -t 'sdv/{VEHICLE_ID}/#' -v")
-    log.info("=" * 60)
-
-    run()
-
-
-if __name__ == "__main__":
-    main()
+    log.info(f"  Databroker :
