@@ -51,6 +51,13 @@ DATABROKER_PORT  = int(os.environ.get("DATABROKER_PORT", "55555"))
 REFRESH_INTERVAL = 1.0   # seconds between each Databroker poll
 HISTORY_MAX      = 60    # rolling window size (60 samples ≈ 60 s at 1 Hz)
 
+# M2: MQTT bridge display config.
+# The dashboard does not connect to Mosquitto directly (FR-81).
+# These vars are used to show the bridge endpoint in the sidebar only.
+MQTT_HOST  = os.environ.get("MQTT_HOST", "mosquitto")
+MQTT_PORT  = int(os.environ.get("MQTT_PORT", "1883"))
+VEHICLE_ID = os.environ.get("VEHICLE_ID", "vehicle-001")
+
 # ── Signal Metadata ───────────────────────────────────────────────────────────
 # Maps each VSS path to its display properties.
 # Keeping this as a dict (not hard-coded in the UI functions) means adding
@@ -266,6 +273,24 @@ HVAC Controller ─┘    Databroker      Dashboard
         st.caption(f"Databroker: `{DATABROKER_HOST}:{DATABROKER_PORT}`")
         st.caption(f"Poll interval: {REFRESH_INTERVAL} s")
         st.caption(f"History window: {HISTORY_MAX} samples")
+
+        # ── M2: MQTT Cloud Bridge info ────────────────────────────────────
+        # The dashboard does not connect to Mosquitto directly (FRD FR-81).
+        # This section shows the configured endpoint and the CLI command
+        # a cloud engineer would use to subscribe to vehicle telemetry.
+        st.divider()
+        st.subheader("MQTT Cloud Bridge")
+        st.markdown(
+            f"**Broker:** `{MQTT_HOST}:{MQTT_PORT}`  \n"
+            f"**Vehicle ID:** `{VEHICLE_ID}`\n\n"
+            "Subscribe from host terminal:\n"
+            "```\n"
+            f"mosquitto_sub -h localhost \\\\\n"
+            f"  -p {MQTT_PORT} \\\\\n"
+            f"  -t \"sdv/{VEHICLE_ID}/#\" -v\n"
+            "```"
+        )
+        st.caption("M2 — Vehicle-to-Cloud telemetry via MQTT")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

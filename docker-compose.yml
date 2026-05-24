@@ -1,51 +1,37 @@
-# mini-sdv-platform — Milestone 1: Live Vehicle Signal Dashboard
+# mini-sdv-platform — Milestone 2: MQTT Cloud Bridge
 # ──────────────────────────────────────────────────────────────────────────────
 #
 # SDV Architecture Simulation:
 #
-#   Real vehicle:  ECUs (CAN bus) → Central Gateway → Vehicle Middleware → Apps
-#   This file:     ECU Simulator  → Kuksa Databroker → Streamlit Dashboard
+#   Real vehicle:  ECUs (CAN) → Central Gateway → Databroker → MQTT Bridge → Cloud
+#   This file:     ECU Sim    → Kuksa Databroker → MQTT Bridge → Mosquitto
 #
-# All services communicate over the internal Docker bridge network "sdv-net".
-# Only the dashboard port (8501) is exposed to the host machine.
+# Services:
+#   databroker    — vehicle signal middleware (M1)
+#   ecu-simulator — publishes ECU signals via gRPC (M1)
+#   dashboard     — Streamlit live signal viewer (M1)
+#   mosquitto     — MQTT broker, cloud exit point (M2)
+#   mqtt-bridge   — subscribes Kuksa, forwards to Mosquitto (M2)
 #
 # Usage:
-#   Start:   docker compose up
-#   Stop:    docker compose down
-#   Logs:    docker compose logs -f
-#   Rebuild: docker compose build --no-cache
+#   Start:         docker compose up
+#   Stop:          docker compose down
+#   Logs:          docker compose logs -f
+#   Test V2C:      mosquitto_sub -h localhost -p 1883 -t "sdv/vehicle-001/#" -v
 
 services:
 
-  # ── Service 1: Kuksa Databroker ─────────────────────────────────────────────
+  # ── M1: Kuksa Databroker ────────────────────────────────────────────────────
   #
-  # The central vehicle middleware — the single source of truth for all signal
-  # state in the simulated vehicle.
-  #
-  # SDV Concept:
-  #   In production SDV platforms (e.g., Volkswagen CARIAD E3, Bosch SDV),
-  #   the Databroker role is filled by a "Vehicle Abstraction Layer" (VAL)
-  #   running on the Central Vehicle Computer (CVC). All ECU data flows
-  #   through it. No application talks directly to an ECU.
-  #
-  # Eclipse Kuksa is an open-source implementation of this pattern, used by
-  # COVESA member companies. It exposes a gRPC API conforming to the
-  # Vehicle Signal Specification (VSS) naming standard.
+  # Central vehicle middleware — single source of truth for all signal state.
+  # SDV equivalent: Vehicle Abstraction Layer (VAL) on the Central Vehicle Computer.
   databroker:
     image: ghcr.io/eclipse/kuksa.val/databroker:0.4.4
     command: ["--vss", "/vss.json", "--insecure"]
     volumes:
-      # Mount our custom VSS catalog in COVESA hierarchical format.
-      # :ro = read-only; the catalog is immutable at runtime (signals are
-      # defined at design time, not discovered dynamically in M1).
       - ./config/vss/vss_mini_covesa.json:/vss.json:ro
     networks:
       - sdv-net
-    # Health check: confirm the gRPC port accepts connections before
-    # dependent services attempt to connect.
-    # Note: Uses bash /dev/tcp — requires a debian-based base image.
-    # If this fails in your environment, the ECU simulator's reconnect
-    # loop (exponential back-off) provides equivalent resilience.
     healthcheck:
       test: ["CMD-SHELL", "timeout 1 bash -c 'cat < /dev/null > /dev/tcp/localhost/55555' 2>/dev/null && echo healthy || exit 1"]
       interval: 5s
@@ -54,58 +40,18 @@ services:
       start_period: 10s
     restart: on-failure
 
-  # ── Service 2: ECU Simulator ────────────────────────────────────────────────
+  # ── M1: ECU Simulator ──────────────────────────────────────────────────────
   #
-  # Simulates three Electronic Control Units publishing vehicle signals.
-  #
-  # SDV Concept:
-  #   In a real vehicle, each ECU is dedicated hardware (e.g., a Renesas R-Car
-  #   or NXP S32 microcontroller) communicating over ISO 11898 CAN bus.
-  #   A Central Gateway ECU translates CAN frames into gRPC calls for the
-  #   Databroker. This simulator skips the CAN layer (added in Milestone 4)
-  #   and publishes directly via gRPC — the same protocol the real gateway uses.
-  #
-  # Simulated ECUs:
-  #   Powertrain ECU    → Vehicle.Speed             (km/h)
-  #   Battery Mgmt Sys  → Vehicle.Battery.SoC       (%)
-  #   HVAC Controller   → Vehicle.Cabin.Temperature (°C)
+  # Simulates Powertrain ECU, Battery Management System, and HVAC Controller
+  # publishing signals to the Databroker via gRPC.
   ecu-simulator:
     build:
       context: ./services/ecu-simulator
       dockerfile: Dockerfile
     environment:
-      DATABROKER_HOST: databroker    # Docker DNS name — resolves on sdv-net
-      DATABROKER_PORT: "55555"       # Kuksa gRPC port
-      UPDATE_INTERVAL_SEC: "1.0"    # Signal publish interval (seconds)
-    depends_on:
-      databroker:
-        condition: service_healthy   # Wait for Databroker TCP probe to pass
-    networks:
-      - sdv-net
-    restart: on-failure
-
-  # ── Service 3: Streamlit Dashboard ─────────────────────────────────────────
-  #
-  # A live browser dashboard that reads and visualises vehicle signals.
-  #
-  # SDV Concept:
-  #   This represents the consumer side of the Vehicle Abstraction Layer.
-  #   In a real SDV, this role is played by:
-  #     - The instrument cluster / HMI app (reading Speed, Cabin Temp)
-  #     - A fleet telematics backend (reading all signals over MQTT/cloud)
-  #     - An AI monitoring agent (reading anomalies in Battery SoC)
-  #   All of these connect to the Databroker, not to individual ECUs.
-  #
-  # Access: http://localhost:8501
-  dashboard:
-    build:
-      context: ./services/dashboard
-      dockerfile: Dockerfile
-    ports:
-      - "8501:8501"                  # Only this port is exposed to the host
-    environment:
       DATABROKER_HOST: databroker
       DATABROKER_PORT: "55555"
+      UPDATE_INTERVAL_SEC: "1.0"
     depends_on:
       databroker:
         condition: service_healthy
@@ -113,14 +59,100 @@ services:
       - sdv-net
     restart: on-failure
 
+  # ── M1: Streamlit Dashboard ─────────────────────────────────────────────────
+  #
+  # Live browser dashboard — polls Databroker and visualises vehicle signals.
+  # SDV equivalent: HMI instrument cluster or cloud telemetry frontend.
+  # Access: http://localhost:8501
+  dashboard:
+    build:
+      context: ./services/dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "8501:8501"
+    environment:
+      DATABROKER_HOST: databroker
+      DATABROKER_PORT: "55555"
+      # M2: provide MQTT info for sidebar display (dashboard does not connect
+      # to Mosquitto directly — info only)
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      VEHICLE_ID: "vehicle-001"
+    depends_on:
+      databroker:
+        condition: service_healthy
+    networks:
+      - sdv-net
+    restart: on-failure
+
+  # ── M2: Mosquitto MQTT Broker ───────────────────────────────────────────────
+  #
+  # Receives vehicle telemetry from the MQTT bridge and distributes it to
+  # any number of cloud subscribers.
+  #
+  # SDV Concept:
+  #   In production, this role is played by a managed cloud MQTT endpoint:
+  #     AWS IoT Core  → mqtt.us-east-1.amazonaws.com:8883 (TLS)
+  #     Azure IoT Hub → <hub>.azure-devices.net:8883 (TLS)
+  #   Mosquitto is a local drop-in replacement with identical MQTT semantics.
+  #   The mqtt-bridge requires zero code changes to point at a real cloud broker.
+  #
+  # Test from host (after docker compose up):
+  #   mosquitto_sub -h localhost -p 1883 -t "sdv/vehicle-001/#" -v
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    volumes:
+      # Mosquitto requires a config file — without it the container exits.
+      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "1883:1883"               # Expose to host for CLI testing
+    networks:
+      - sdv-net
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c 'cat < /dev/null > /dev/tcp/localhost/1883' 2>/dev/null && echo healthy || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: on-failure
+
+  # ── M2: MQTT Bridge ─────────────────────────────────────────────────────────
+  #
+  # The V2C (Vehicle-to-Cloud) gateway service.
+  # Subscribes to Kuksa Databroker via gRPC streaming (not polling — see main.py)
+  # and publishes each signal update to Mosquitto as a JSON payload.
+  #
+  # SDV Concept:
+  #   Crossing the vehicle / cloud boundary is architecturally significant.
+  #   Inside the vehicle: gRPC, typed VSS signals, low latency, authenticated.
+  #   Outside the vehicle: MQTT, JSON payloads, cloud-friendly, scalable.
+  #   The bridge is the only component that crosses this boundary.
+  mqtt-bridge:
+    build:
+      context: ./services/mqtt-bridge
+      dockerfile: Dockerfile
+    environment:
+      DATABROKER_HOST: databroker
+      DATABROKER_PORT: "55555"
+      MQTT_HOST: mosquitto          # Docker DNS name of the Mosquitto service
+      MQTT_PORT: "1883"
+      VEHICLE_ID: "vehicle-001"     # Prefixes all MQTT topics: sdv/vehicle-001/...
+    depends_on:
+      databroker:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    networks:
+      - sdv-net
+    restart: on-failure
+
 # ── Network ─────────────────────────────────────────────────────────────────
-# All services share one internal bridge network.
-# Services reference each other by service name (Docker internal DNS).
-# No cross-service port is exposed to the host machine except :8501.
+# All 5 services share one internal bridge network.
+# Only :8501 (dashboard) and :1883 (MQTT test) are exposed to the host.
 #
 # SDV Concept:
-#   Analogous to a private in-vehicle Ethernet segment (SOME/IP / DDS domain)
-#   that isolates vehicle services from the external network.
+#   Analogous to the separation between in-vehicle Ethernet (SOME/IP / DDS)
+#   and the external cellular / V2X network interface.
 networks:
   sdv-net:
     driver: bridge

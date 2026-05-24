@@ -30,7 +30,7 @@ This project simulates that architecture using Eclipse Kuksa as the VAL.
 
 ---
 
-## Milestone 1 Architecture
+## Current Architecture (Milestone 2)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -38,34 +38,36 @@ This project simulates that architecture using Eclipse Kuksa as the VAL.
 │                                                                  │
 │  ┌─────────────────────┐   gRPC SetCurrentValues                 │
 │  │   ecu-simulator     │──────────────────────────┐             │
-│  │                     │                          │             │
-│  │  Powertrain ECU     │                          ▼             │
-│  │  → Vehicle.Speed    │            ┌─────────────────────────┐ │
-│  │                     │            │   kuksa-databroker      │ │
-│  │  Battery Mgmt Sys   │            │   :55555 (gRPC)         │ │
-│  │  → Vehicle.Battery  │            │                         │ │
-│  │      .SoC           │            │  Signal store (VSS):    │ │
-│  │                     │            │  • Vehicle.Speed        │ │
-│  │  HVAC Controller    │            │  • Vehicle.Battery.SoC  │ │
-│  │  → Vehicle.Cabin    │            │  • Vehicle.Cabin.Temp   │ │
-│  │      .Temperature   │            └─────────────────────────┘ │
-│  └─────────────────────┘                        │               │
-│           ↑ 1 s interval                        │               │
-│    VehicleState physics sim            gRPC GetCurrentValues     │
-│                                                 │               │
-│                                                 ▼               │
-│                                   ┌──────────────────────────┐  │
-│                                   │  dashboard               │  │
-│                                   │  :8501 (Streamlit HTTP)  │  │
-│                                   │                          │  │
-│                                   │  ┌──────┐ ┌────┐ ┌───┐  │  │
-│                                   │  │Speed │ │SoC │ │°C │  │  │
-│                                   │  └──────┘ └────┘ └───┘  │  │
-│                                   │  [live charts ...]       │  │
-│                                   └──────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────┘
-                     ▲
-         http://localhost:8501
+│  │  Powertrain ECU     │                          │             │
+│  │  Battery Mgmt Sys   │                          ▼             │
+│  │  HVAC Controller    │            ┌─────────────────────────┐ │
+│  └─────────────────────┘            │   kuksa-databroker      │ │
+│           ↑ 1 s interval            │   :55555 (gRPC)         │ │
+│    VehicleState physics sim         │                         │ │
+│                                     │  • Vehicle.Speed        │ │
+│                                     │  • Vehicle.Battery.SoC  │ │
+│                                     │  • Vehicle.Cabin.Temp   │ │
+│                                     └─────────────────────────┘ │
+│                                        │              │          │
+│                               gRPC Get │    gRPC      │ Subscribe│
+│                               (poll)   │    (stream)  │          │
+│                                        ▼              ▼          │
+│                          ┌──────────────┐  ┌───────────────────┐ │
+│                          │  dashboard   │  │   mqtt-bridge     │ │
+│                          │  :8501       │  │                   │ │
+│                          │  [M1 charts] │  │ MQTT publish      │ │
+│                          └──────────────┘  └───────────────────┘ │
+│                                                      │           │
+│                                              MQTT :1883          │
+│                                                      ▼           │
+│                                           ┌────────────────────┐ │
+│                                           │   mosquitto        │ │
+│                                           │   :1883            │ │
+│                                           └────────────────────┘ │
+└───────────────────────────────────────────────────┬──────────────┘
+         http://localhost:8501  (dashboard)          │ :1883 (MQTT)
+                                                     ▼
+                                        mosquitto_sub (host CLI)
 ```
 
 ---
@@ -106,6 +108,26 @@ docker compose up
 
 ---
 
+## Quick Test for Milestone 2 (MQTT Cloud Bridge)
+
+After `docker compose up`, open a second terminal on your host machine:
+
+```bash
+# Subscribe to all vehicle signals in real time
+mosquitto_sub -h localhost -p 1883 -t "sdv/vehicle-001/#" -v
+```
+
+Expected output (1 Hz per signal):
+```
+sdv/vehicle-001/Vehicle/Speed {"signal": "Vehicle.Speed", "value": 87.3, "unit": "km/h", "timestamp": "2026-05-23T14:30:01"}
+sdv/vehicle-001/Vehicle/Battery/SoC {"signal": "Vehicle.Battery.SoC", "value": 72.4, "unit": "percent", "timestamp": "2026-05-23T14:30:01"}
+sdv/vehicle-001/Vehicle/Cabin/Temperature {"signal": "Vehicle.Cabin.Temperature", "value": 22.1, "unit": "celsius", "timestamp": "2026-05-23T14:30:01"}
+```
+
+> **No `mosquitto_sub` installed?** On Ubuntu: `sudo apt install mosquitto-clients` · On macOS: `brew install mosquitto`
+
+---
+
 ## Services
 
 ### 1. `databroker` — Eclipse Kuksa Databroker
@@ -141,6 +163,39 @@ Simulates three Electronic Control Units publishing vehicle signals to the Datab
 **Real-world equivalent:** Physical ECUs communicating over ISO 11898 CAN bus → Central Gateway ECU → gRPC to Databroker. In Milestone 4 (SocketCAN), the virtual CAN layer between the ECU simulator and the Databroker will be added.
 
 **Resilience pattern:** The simulator implements an exponential back-off reconnect loop (2 s → 4 s → 8 s … capped at 30 s). If the Databroker restarts, the simulator reconnects automatically without container restart. This is a cloud-native service pattern, not a Docker restart policy dependency.
+
+---
+
+### 4. `mosquitto` — Eclipse Mosquitto MQTT Broker
+
+**Image:** `eclipse-mosquitto:2.0`
+
+The cloud-side message broker. Receives vehicle telemetry from the MQTT bridge and distributes it to any number of subscribers.
+
+**Real-world equivalent:** AWS IoT Core, Azure IoT Hub, or HiveMQ Cloud — all expose an MQTT endpoint that vehicles publish to. Mosquitto is a local drop-in replacement. The `mqtt-bridge` service requires zero code changes to point at a real cloud broker; only `MQTT_HOST` and `MQTT_PORT` environment variables change.
+
+| Port | Protocol | Access |
+|---|---|---|
+| 1883 | MQTT (plain text) | Host machine (for CLI testing) · All services on sdv-net |
+
+---
+
+### 5. `mqtt-bridge` — MQTT Bridge (V2C Gateway)
+
+**Source:** `services/mqtt-bridge/`
+
+The Vehicle-to-Cloud gateway. Subscribes to the Kuksa Databroker using **gRPC streaming** and publishes each signal update to Mosquitto as a JSON payload.
+
+**Key SDV concept — subscribe vs. poll:**
+
+| Pattern | Used by | When to use |
+|---|---|---|
+| `get_current_values()` (poll) | M1 Dashboard | Periodic UI refresh; Streamlit single-thread model |
+| `subscribe_current_values()` (subscribe) | M2 Bridge | Forwarding; reacts to changes immediately, not on a timer |
+
+The bridge uses subscribe because it is a **reactive forwarder** — it must transmit data the moment it changes, not on a fixed schedule.
+
+**MQTT topic pattern:** `sdv/{vehicle_id}/{VSS_path_with_slashes}`
 
 ---
 
@@ -248,7 +303,7 @@ mini-sdv-platform/
 | Milestone | Goal | New Services | New Concepts |
 |---|---|---|---|
 | **M1** ✅ | Live vehicle signal dashboard | Kuksa Databroker, ECU Simulator, Dashboard | VSS, gRPC, centralized middleware |
-| **M2** | Cloud connectivity | MQTT Broker, Cloud Bridge | MQTT, pub/sub over WAN, message schemas |
+| **M2** ✅ | Cloud connectivity | MQTT Broker, MQTT Bridge | MQTT, V2C telemetry, subscribe vs. poll |
 | **M3** | ROS2 integration | ROS2 node | DDS, topic-based pub/sub, sensor fusion |
 | **M4** | Virtual CAN bus | SocketCAN ECUs | ISO 11898, CAN frames, Gateway ECU pattern |
 | **M5** | AI agent | LLM-based orchestrator | Intelligent actuation, anomaly detection |
