@@ -52,7 +52,7 @@ MQTT_PORT       = int(os.environ.get("MQTT_PORT", "1883"))
 VEHICLE_ID      = os.environ.get("VEHICLE_ID", "vehicle-001")
 POLL_INTERVAL   = int(os.environ.get("POLL_INTERVAL_SEC", "30"))
 ECU_CONFIG_PATH = os.environ.get("ECU_CONFIG_PATH", "/shared/ecu_config.json")
-STATE_FILE      = "/tmp/ota_state.json"
+STATE_FILE      = os.environ.get("OTA_STATE_FILE", "/tmp/ota_state.json")
 STAGING_DIR     = "/tmp/ota-staging"
 STATUS_TOPIC    = f"sdv/{VEHICLE_ID}/ota/status"
 

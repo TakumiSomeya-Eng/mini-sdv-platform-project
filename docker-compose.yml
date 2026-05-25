@@ -354,6 +354,75 @@ services:
     network_mode: host
     restart: on-failure
 
+  # ── M8: Fleet Simulator ─────────────────────────────────────────────────────
+  #
+  # Simulates vehicle-002 and vehicle-003 in parallel threads.
+  # Each vehicle independently publishes Speed/BatterySoC/CabinTemp to
+  # MQTT (sdv/{vehicle_id}/telemetry) and writes to InfluxDB.
+  #
+  # SDV Concept:
+  #   In production, each physical vehicle runs its own Databroker + TCU.
+  #   The cloud sees MQTT streams tagged with vehicle_id from many vehicles.
+  #   This service simulates that cloud-side view without separate CAN buses.
+  fleet-simulator:
+    build:
+      context: ./services/fleet-simulator
+      dockerfile: Dockerfile
+    environment:
+      MQTT_HOST: localhost
+      MQTT_PORT: "1883"
+      INFLUXDB_URL: http://localhost:8086
+      INFLUXDB_TOKEN: sdv-token-local
+      INFLUXDB_ORG: sdv-org
+      INFLUXDB_BUCKET: sdv
+      INTERVAL_SEC: "2"
+    depends_on:
+      - mosquitto
+      - influxdb
+    network_mode: host
+    restart: on-failure
+
+  # ── M8: OTA Manager — vehicle-002 ───────────────────────────────────────────
+  #
+  # Reuses the ota-manager image with VEHICLE_ID=vehicle-002.
+  # Polls the shared manifest independently and reports via sdv/vehicle-002/ota/status.
+  ota-manager-v002:
+    build:
+      context: ./services/ota-manager
+      dockerfile: Dockerfile
+    environment:
+      OTA_SERVER_URL: http://localhost:8080
+      MQTT_HOST: localhost
+      MQTT_PORT: "1883"
+      VEHICLE_ID: "vehicle-002"
+      POLL_INTERVAL_SEC: "30"
+      ECU_CONFIG_PATH: /tmp/ecu_config_v002.json
+      OTA_STATE_FILE: /tmp/ota_state_v002.json
+    depends_on:
+      - ota-server
+      - mosquitto
+    network_mode: host
+    restart: on-failure
+
+  # ── M8: OTA Manager — vehicle-003 ───────────────────────────────────────────
+  ota-manager-v003:
+    build:
+      context: ./services/ota-manager
+      dockerfile: Dockerfile
+    environment:
+      OTA_SERVER_URL: http://localhost:8080
+      MQTT_HOST: localhost
+      MQTT_PORT: "1883"
+      VEHICLE_ID: "vehicle-003"
+      POLL_INTERVAL_SEC: "30"
+      ECU_CONFIG_PATH: /tmp/ecu_config_v003.json
+      OTA_STATE_FILE: /tmp/ota_state_v003.json
+    depends_on:
+      - ota-server
+      - mosquitto
+    network_mode: host
+    restart: on-failure
+
   # ── M5: AI Signal Monitor ───────────────────────────────────────────────────
   #
   ai-monitor:
