@@ -1,40 +1,44 @@
 #!/usr/bin/env python3
 """
-ECU Simulator — mini-sdv-platform  Milestone 1 (updated M3)
-=============================================================
-Simulates three vehicle Electronic Control Units (ECUs):
+ECU Simulator — mini-sdv-platform  Milestone 4
+===============================================
+Simulates three vehicle ECUs publishing signals as CAN frames over vcan0.
 
-  ECU                   Signal (COVESA VSS 4.x standard path)                              Unit
-  ─────────────────     ──────────────────────────────────────────────────────────────────  ─────
-  Powertrain ECU     →  Vehicle.Speed                                                       km/h
-  Battery Mgmt Sys   →  Vehicle.Powertrain.TractionBattery.StateOfCharge.Current            %
-  HVAC Controller    →  Vehicle.Cabin.HVAC.AmbientAirTemperature                            °C
+  ECU                   CAN ID   Signal                                                     Unit
+  ─────────────────     ───────  ──────────────────────────────────────────────────────────  ────
+  Powertrain ECU     →  0x100    Vehicle.Speed                                               km/h
+  Battery Mgmt Sys   →  0x200    Vehicle.Powertrain.TractionBattery.StateOfCharge.Current   %
+  HVAC Controller    →  0x300    Vehicle.Cabin.HVAC.AmbientAirTemperature                   °C
 
-Milestone 3 change: VSS signal paths migrated to COVESA VSS 4.x standard paths.
-  Vehicle.Battery.SoC       → Vehicle.Powertrain.TractionBattery.StateOfCharge.Current
-  Vehicle.Cabin.Temperature → Vehicle.Cabin.HVAC.AmbientAirTemperature
+M4 change:
+  M1–M3 published signals directly to the Kuksa Databroker via gRPC.
+  M4 publishes CAN frames to vcan0. A separate CAN Gateway service
+  reads these frames and forwards them to the Databroker — mirroring
+  the real vehicle architecture (ECU → CAN bus → Gateway ECU → Middleware).
 
 SDV concept:
-  In a real vehicle, ECUs communicate over CAN bus (ISO 11898).
-  A central gateway ECU reads those CAN frames and forwards them
-  to the in-vehicle middleware (here: Kuksa Databroker) via gRPC.
-  This simulator replaces the physical bus + gateway by writing
-  directly to the Databroker — Milestone 4 adds SocketCAN.
+  In a real vehicle, an ECU never knows the Databroker exists.
+  It simply puts a CAN frame on the bus (ID + bytes).
+  The Gateway ECU is responsible for protocol translation.
+  This decoupling is what allows the middleware to be upgraded
+  without touching ECU firmware.
 
-Design decisions:
-  • Single Python process — keeps M1 simple; real ECUs are separate hardware.
-  • Direct gRPC publish — removes CAN dependency for now.
-  • Sinusoidal + Gaussian noise — produces smooth, realistic-looking telemetry.
-  • Reconnect loop — handles the race condition at container startup.
+CAN frame encoding:
+  Each signal value is packed as a 32-bit IEEE 754 float, little-endian.
+  This is a common encoding used in real automotive ECUs and is the
+  format expected by the CAN Gateway (services/can-gateway/main.py).
+
+  struct.pack('<f', 87.3) → b'\\xae\\x47\\xae\\x42'
 """
 
 import logging
 import math
 import os
 import random
+import struct
 import time
 
-from kuksa_client.grpc import Datapoint, VSSClient
+import can
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -44,124 +48,133 @@ logging.basicConfig(
 )
 log = logging.getLogger("ecu-simulator")
 
-# ── Configuration (override via environment variables) ────────────────────────
-DATABROKER_HOST  = os.environ.get("DATABROKER_HOST", "localhost")
-DATABROKER_PORT  = int(os.environ.get("DATABROKER_PORT", "55555"))
-UPDATE_INTERVAL  = float(os.environ.get("UPDATE_INTERVAL_SEC", "1.0"))
+# ── Configuration ─────────────────────────────────────────────────────────────
+CAN_INTERFACE   = os.environ.get("CAN_INTERFACE", "vcan0")
+UPDATE_INTERVAL = float(os.environ.get("UPDATE_INTERVAL_SEC", "1.0"))
 
-# ── VSS Signal Paths (COVESA VSS 4.x standard — migrated in M3) ──────────────
-# VSS (Vehicle Signal Specification) defines a standardised, hierarchical
-# naming tree for all vehicle data.  Using a shared catalog lets any app or
-# service discover and subscribe to signals without prior negotiation.
-# Paths here must match config/vss/vss_mini_covesa.json mounted into the Databroker.
-SIGNAL_SPEED = "Vehicle.Speed"                                             # km/h — Powertrain ECU
-SIGNAL_SOC   = "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current" # %    — Battery Management System
-SIGNAL_TEMP  = "Vehicle.Cabin.HVAC.AmbientAirTemperature"                 # °C   — HVAC Controller
+# ── CAN ID → VSS Signal mapping ───────────────────────────────────────────────
+# Arbitration IDs identify the signal on the CAN bus.
+# In a real vehicle these IDs are defined in a DBC (database CAN) file
+# maintained by the vehicle's signal architect.
+CAN_IDS: dict[str, int] = {
+    "Vehicle.Speed":                                                  0x100,
+    "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current":       0x200,
+    "Vehicle.Cabin.HVAC.AmbientAirTemperature":                       0x300,
+}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Vehicle physics simulation
+# Vehicle physics simulation (unchanged from M1–M3)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class VehicleState:
-    """
-    Produces smooth, realistic-looking telemetry using periodic functions
-    and Gaussian noise — no real physics engine needed for M1.
-
-    Each signal has a different period so the charts don't look identical.
-    """
+    """Produces smooth, realistic-looking telemetry using periodic functions."""
 
     def __init__(self) -> None:
-        self._t: float = 0.0  # simulation clock (ticks)
+        self._t: float = 0.0
 
-    # ── Powertrain ECU ────────────────────────────────────────────────────────
     def speed(self) -> float:
-        """
-        Sinusoidal cruise pattern (city driving cycle approximation).
-        Range: ~10 – 120 km/h with ±1.5 km/h Gaussian noise.
-        """
         base  = 65.0 + 50.0 * math.sin(self._t * 0.04)
         noise = random.gauss(0.0, 1.5)
         return round(max(0.0, min(250.0, base + noise)), 1)
 
-    # ── Battery Management System ─────────────────────────────────────────────
     def battery_soc(self) -> float:
-        """
-        Slow linear drain from 85 % to 55 %, then reset (charge cycle).
-        600-tick period ≈ 10 minutes at 1 s update rate.
-        """
         phase = self._t % 600
         base  = 85.0 - phase * 0.05
         noise = random.gauss(0.0, 0.05)
         return round(max(0.0, min(100.0, base + noise)), 2)
 
-    # ── HVAC Controller ───────────────────────────────────────────────────────
     def cabin_temperature(self) -> float:
-        """
-        Slow warm-up toward setpoint with sinusoidal HVAC cycling.
-        Range: 19.5 – 24.5 °C with ±0.15 °C noise.
-        """
         base  = 22.0 + 2.5 * math.sin(self._t * 0.015)
         noise = random.gauss(0.0, 0.15)
         return round(base + noise, 1)
 
     def advance(self) -> None:
-        """Increment the simulation clock by one tick."""
         self._t += 1.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main loop
+# CAN publisher
 # ─────────────────────────────────────────────────────────────────────────────
+
+def send_signal(bus: can.BusABC, path: str, value: float) -> None:
+    """Pack a float32 value into a 4-byte CAN frame and send it."""
+    can_id = CAN_IDS[path]
+    data   = struct.pack('<f', value)          # float32 little-endian
+    msg    = can.Message(
+        arbitration_id=can_id,
+        data=data,
+        is_extended_id=False,                  # standard 11-bit ID
+    )
+    bus.send(msg)
+    log.info(
+        f"TX CAN 0x{can_id:03X} [{len(data)}] "
+        f"{' '.join(f'{b:02X}' for b in data)}"
+        f"  → {path.split('.')[-1]} = {value:.2f}"
+    )
+
 
 def run(vehicle: VehicleState) -> None:
     """
-    Outer reconnect loop — establishes a gRPC connection to the Databroker
-    and publishes signals continuously.  If the connection drops (e.g. during
-    a Databroker restart), it waits and reconnects automatically.
+    Outer reconnect loop.
 
-    Cloud-native pattern: prefer reconnect loops over crash-and-exit so that
-    Docker's restart policy is a last resort, not the primary recovery path.
+    Opens a SocketCAN socket on vcan0 and sends CAN frames continuously.
+    If vcan0 is not available (e.g. modprobe vcan not run yet), waits
+    with exponential back-off and retries — same resilience pattern as M1–M3.
     """
     retry_delay = 2.0
 
     while True:
-        log.info(f"Connecting to Kuksa Databroker at {DATABROKER_HOST}:{DATABROKER_PORT} …")
+        bus = None
         try:
-            with VSSClient(DATABROKER_HOST, DATABROKER_PORT) as client:
-                log.info("Connected — starting signal publication loop.")
-                retry_delay = 2.0  # reset back-off on successful connect
+            log.info(f"Opening CAN bus on interface '{CAN_INTERFACE}' …")
+            bus = can.interface.Bus(channel=CAN_INTERFACE, interface='socketcan')
+            log.info("CAN bus open — starting signal publication loop.")
+            retry_delay = 2.0
 
-                while True:
-                    vehicle.advance()
+            while True:
+                vehicle.advance()
 
-                    speed = vehicle.speed()
-                    soc   = vehicle.battery_soc()
-                    temp  = vehicle.cabin_temperature()
+                send_signal(bus, "Vehicle.Speed",
+                            vehicle.speed())
+                send_signal(bus, "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current",
+                            vehicle.battery_soc())
+                send_signal(bus, "Vehicle.Cabin.HVAC.AmbientAirTemperature",
+                            vehicle.cabin_temperature())
 
-                    # Publish all three signals in a single gRPC SetRequest.
-                    # The Databroker atomically stores the new Datapoint values
-                    # with a server-side timestamp.
-                    client.set_current_values({
-                        SIGNAL_SPEED: Datapoint(speed),
-                        SIGNAL_SOC:   Datapoint(soc),
-                        SIGNAL_TEMP:  Datapoint(temp),
-                    })
-
-                    log.info(
-                        "Published → "
-                        f"Speed={speed:6.1f} km/h | "
-                        f"SoC={soc:5.2f} % | "
-                        f"Temp={temp:5.1f} °C"
-                    )
-
-                    time.sleep(UPDATE_INTERVAL)
+                time.sleep(UPDATE_INTERVAL)
 
         except KeyboardInterrupt:
             log.info("Shutdown requested — stopping ECU simulator.")
             return
 
         except Exception as exc:
-            log.warning(f"Connection error: {exc}")
+            log.warning(f"CAN error: {exc}")
             log.info(f"Retrying in {retry_delay:.0f} s …")
             time.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 30.0)
+
+        finally:
+            if bus is not None:
+                try:
+                    bus.shutdown()
+                except Exception:
+                    pass
+
+
+def main() -> None:
+    log.info("=" * 60)
+    log.info("  mini-SDV Platform — ECU Simulator  (Milestone 4)")
+    log.info(f"  CAN interface : {CAN_INTERFACE}")
+    log.info(f"  Interval      : {UPDATE_INTERVAL} s")
+    log.info(f"  CAN ID 0x100  → Vehicle.Speed          (km/h)")
+    log.info(f"  CAN ID 0x200  → Battery SoC            (%)")
+    log.info(f"  CAN ID 0x300  → Cabin Temperature      (°C)")
+    log.info("=" * 60)
+
+    vehicle = VehicleState()
+    run(vehicle)
+
+
+if __name__ == "__main__":
+    main()

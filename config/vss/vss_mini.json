@@ -15,4 +15,12 @@
     "min": 0,
     "max": 100
   },
-  "Vehicle.Cabin
+  "Vehicle.Cabin.HVAC.AmbientAirTemperature": {
+    "datatype": "float",
+    "description": "Current measured cabin ambient air temperature. Reported by the HVAC Controller. COVESA VSS 4.x standard path (migrated from Vehicle.Cabin.Temperature in M1/M2).",
+    "type": "sensor",
+    "unit": "celsius",
+    "min": -40,
+    "max": 100
+  }
+}

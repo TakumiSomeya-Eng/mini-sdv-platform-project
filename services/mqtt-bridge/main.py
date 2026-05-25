@@ -240,4 +240,18 @@ def run() -> None:
 def main() -> None:
     log.info("=" * 60)
     log.info("  mini-SDV Platform — MQTT Bridge  (Milestone 2)")
-    log.info(f"  Databroker :
+    log.info(f"  Databroker : {DATABROKER_HOST}:{DATABROKER_PORT}")
+    log.info(f"  MQTT       : {MQTT_HOST}:{MQTT_PORT}")
+    log.info(f"  Vehicle ID : {VEHICLE_ID}")
+    log.info(f"  Topics     : sdv/{VEHICLE_ID}/Vehicle/Speed")
+    log.info(f"             : sdv/{VEHICLE_ID}/Vehicle/Battery/SoC")
+    log.info(f"             : sdv/{VEHICLE_ID}/Vehicle/Cabin/Temperature")
+    log.info("  Subscribe  : mosquitto_sub -h localhost "
+             f"-p {MQTT_PORT} -t 'sdv/{VEHICLE_ID}/#' -v")
+    log.info("=" * 60)
+
+    run()
+
+
+if __name__ == "__main__":
+    main()

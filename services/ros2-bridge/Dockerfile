@@ -10,8 +10,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # kuksa-client is not bundled in the ROS base image, so we install it via pip.
 # rclpy and std_msgs are already provided by ros:jazzy-ros-base.
 # --break-system-packages is required because this image uses a system-managed Python.
+RUN apt-get update && apt-get install -y python3-pip && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
 COPY main.py .
 

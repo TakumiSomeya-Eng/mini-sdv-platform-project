@@ -139,8 +139,8 @@ def poll_databroker() -> dict[str, float | None]:
         log.info(
             "Poll → "
             f"Speed={values['Vehicle.Speed']} km/h | "
-            f"SoC={values['Vehicle.Battery.SoC']} % | "
-            f"Temp={values['Vehicle.Cabin.Temperature']} °C"
+            f"SoC={values['Vehicle.Powertrain.TractionBattery.StateOfCharge.Current']} % | "
+            f"Temp={values['Vehicle.Cabin.HVAC.AmbientAirTemperature']} °C"
         )
 
     except Exception as exc:
@@ -337,4 +337,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-                                               

@@ -1,52 +1,52 @@
-# mini-sdv-platform — Milestone 3: ROS2 Integration
+# mini-sdv-platform — Milestone 4: Virtual CAN Bus (SocketCAN)
 # ──────────────────────────────────────────────────────────────────────────────
 #
 # SDV Architecture Simulation:
 #
 #   Real vehicle:  ECUs (CAN) → Central Gateway → Databroker → MQTT Bridge → Cloud
 #                                                            → ROS2 Bridge  → AD Stack
-#   This file:     ECU Sim    → Kuksa Databroker → MQTT Bridge → Mosquitto
-#                                                → ROS2 Bridge → ros2-subscriber
+#   This file:     ECU Sim ─CAN─▶ vcan0 ─CAN─▶ CAN Gateway → Databroker → Dashboard
+#                                                                         → MQTT Bridge → Mosquitto
+#                                                                         → ROS2 Bridge → ros2-subscriber
 #
-# Services:
-#   databroker      — vehicle signal middleware (M1)
-#   ecu-simulator   — publishes ECU signals via gRPC (M1)
+# M4 execution environment:
+#   All Docker services run inside WSL2 Ubuntu using Docker Engine (not Docker
+#   Desktop). This gives direct access to the same Linux kernel as vcan0.
+#   network_mode: host is used because dockerd runs with --iptables=false
+#   (the custom 6.18 kernel is missing ip_tables.ko); host networking bypasses
+#   NAT entirely — services bind directly to WSL2's loopback, and WSL2
+#   automatically forwards those ports to Windows localhost.
+#
+# Services in Docker Compose (run from WSL2):
+#   databroker      — vehicle signal middleware
 #   dashboard       — Streamlit live signal viewer (M1)
 #   mosquitto       — MQTT broker, cloud exit point (M2)
 #   mqtt-bridge     — subscribes Kuksa, forwards to Mosquitto (M2)
 #   ros2-bridge     — subscribes Kuksa, forwards to ROS2 topics via DDS (M3)
 #   ros2-subscriber — ROS2 test subscriber, verifies DDS delivery (M3)
 #
-# Three-consumer pattern (M3 milestone):
-#   One Databroker — three consumers — three protocols:
-#     dashboard       → gRPC poll       → human UI
-#     mqtt-bridge     → gRPC subscribe  → MQTT → cloud
-#     ros2-bridge     → gRPC subscribe  → DDS  → autonomous driving stack
+# Services run directly in WSL2 (M4):
+#   ecu-simulator   — sends CAN frames to vcan0 (services/ecu-simulator/main.py)
+#   can-gateway     — reads vcan0, publishes to Databroker (services/can-gateway/main.py)
 #
-# Usage:
-#   Start:              docker compose up
-#   Stop:               docker compose down
-#   Logs (all):         docker compose logs -f
-#   Test V2C (MQTT):    mosquitto_sub -h localhost -p 1883 -t "sdv/vehicle-001/#" -v
-#   Test AD (ROS2):     docker compose logs -f ros2-subscriber
+# Usage (all commands run in WSL2 Ubuntu terminal):
+#   0. First-time setup:  bash scripts/setup-wsl2.sh
+#   1. Start services:    docker compose up -d
+#   2. Start gateway:     ~/sdv-venv/bin/python services/can-gateway/main.py
+#   3. Start ECU:         ~/sdv-venv/bin/python services/ecu-simulator/main.py
+#   4. Monitor CAN:       candump vcan0
+#   5. Dashboard:         http://localhost:8501  (accessible from Windows browser)
+#   Test V2C (MQTT):      mosquitto_sub -h localhost -p 1883 -t "sdv/vehicle-001/#" -v
+#   Test AD (ROS2):       docker compose logs -f ros2-subscriber
 
-# ── CycloneDDS unicast peer configuration (shared by all ROS2 services) ───────
+# ── CycloneDDS config for host networking ─────────────────────────────────────
 #
-# Docker bridge networks do not reliably forward multicast UDP between
-# containers. CycloneDDS is configured here to use direct unicast peer
-# discovery instead of multicast. Both ros2-bridge and ros2-subscriber
-# list each other as peers so DDS discovery works without multicast.
-#
-# This config is injected as an environment variable (CYCLONEDDS_URI)
-# using a YAML anchor to avoid duplicating the XML string.
+# With network_mode: host, all ROS2 services share WSL2's network namespace.
+# DDS multicast works on the loopback interface — no unicast peer workaround needed.
 x-cyclonedds-config: &cyclonedds-config
   CYCLONEDDS_URI: >-
     <CycloneDDS><Domain>
-    <General><AllowMulticast>false</AllowMulticast></General>
-    <Discovery><Peers>
-    <Peer Address="ros2-bridge"/>
-    <Peer Address="ros2-subscriber"/>
-    </Peers></Discovery>
+    <General><AllowMulticast>true</AllowMulticast></General>
     </Domain></CycloneDDS>
 
 services:
@@ -56,67 +56,45 @@ services:
   # Central vehicle middleware — single source of truth for all signal state.
   # SDV equivalent: Vehicle Abstraction Layer (VAL) on the Central Vehicle Computer.
   #
-  # M3 change: VSS catalog now uses COVESA VSS 4.x standard paths.
+  # With host networking: binds to WSL2 localhost:55555
+  # CAN Gateway (running in WSL2) connects via DATABROKER_HOST=localhost
   databroker:
-    image: ghcr.io/eclipse/kuksa.val/databroker:0.4.4
+    image: ghcr.io/eclipse-kuksa/kuksa-databroker:0.4.4
     command: ["--vss", "/vss.json", "--insecure"]
     volumes:
       - ./config/vss/vss_mini_covesa.json:/vss.json:ro
-    networks:
-      - sdv-net
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 1 bash -c 'cat < /dev/null > /dev/tcp/localhost/55555' 2>/dev/null && echo healthy || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
+    network_mode: host
     restart: on-failure
 
-  # ── M1: ECU Simulator ──────────────────────────────────────────────────────
+  # ── M4: ECU Simulator — runs in WSL2, not Docker ───────────────────────────
   #
-  # Simulates Powertrain ECU, Battery Management System, and HVAC Controller
-  # publishing signals to the Databroker via gRPC.
+  # Moved out of Docker Compose in M4. The ECU Simulator now publishes
+  # CAN frames to vcan0 (SocketCAN kernel interface) instead of gRPC.
   #
-  # M3 change: publishes to COVESA VSS 4.x standard paths.
-  ecu-simulator:
-    build:
-      context: ./services/ecu-simulator
-      dockerfile: Dockerfile
-    environment:
-      DATABROKER_HOST: databroker
-      DATABROKER_PORT: "55555"
-      UPDATE_INTERVAL_SEC: "1.0"
-    depends_on:
-      databroker:
-        condition: service_healthy
-    networks:
-      - sdv-net
-    restart: on-failure
+  # Run in WSL2:
+  #   ~/sdv-venv/bin/python services/ecu-simulator/main.py
 
   # ── M1: Streamlit Dashboard ─────────────────────────────────────────────────
   #
   # Live browser dashboard — polls Databroker and visualises vehicle signals.
   # SDV equivalent: HMI instrument cluster or cloud telemetry frontend.
-  # Access: http://localhost:8501
+  # Access: http://localhost:8501 (Windows browser via WSL2 port forwarding)
   #
   # M3 change: reads from COVESA VSS 4.x standard paths.
   dashboard:
     build:
       context: ./services/dashboard
       dockerfile: Dockerfile
-    ports:
-      - "8501:8501"
     environment:
-      DATABROKER_HOST: databroker
+      DATABROKER_HOST: localhost
       DATABROKER_PORT: "55555"
-      MQTT_HOST: mosquitto
+      MQTT_HOST: localhost
       MQTT_PORT: "1883"
       VEHICLE_ID: "vehicle-001"
     depends_on:
       databroker:
-        condition: service_healthy
-    networks:
-      - sdv-net
+        condition: service_started
+    network_mode: host
     restart: on-failure
 
   # ── M2: Mosquitto MQTT Broker ───────────────────────────────────────────────
@@ -129,27 +107,102 @@ services:
   #     AWS IoT Core  → mqtt.us-east-1.amazonaws.com:8883 (TLS)
   #     Azure IoT Hub → <hub>.azure-devices.net:8883 (TLS)
   #   Mosquitto is a local drop-in replacement with identical MQTT semantics.
-  #   The mqtt-bridge requires zero code changes to point at a real cloud broker.
   #
-  # Test from host (after docker compose up):
+  # Test from WSL2 (or Windows via localhost):
   #   mosquitto_sub -h localhost -p 1883 -t "sdv/vehicle-001/#" -v
   mosquitto:
     image: eclipse-mosquitto:2.0
     volumes:
       - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-    ports:
-      - "1883:1883"
-    networks:
-      - sdv-net
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 1 bash -c 'cat < /dev/null > /dev/tcp/localhost/1883' 2>/dev/null && echo healthy || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
+    network_mode: host
     restart: on-failure
 
   # ── M2: MQTT Bridge ─────────────────────────────────────────────────────────
   #
   # The V2C (Vehicle-to-Cloud) gateway service.
-  # Subscribes to Kuksa Databroker via gRPC streaming an
+  # Subscribes to Kuksa Databroker via gRPC streaming and publishes each
+  # signal update to Mosquitto as a JSON payload.
+  #
+  # SDV Concept:
+  #   Inside the vehicle: gRPC, typed VSS signals, low latency.
+  #   Outside the vehicle: MQTT, JSON payloads, cloud-friendly, scalable.
+  #   The bridge is the only component that crosses this boundary.
+  mqtt-bridge:
+    build:
+      context: ./services/mqtt-bridge
+      dockerfile: Dockerfile
+    environment:
+      DATABROKER_HOST: localhost
+      DATABROKER_PORT: "55555"
+      MQTT_HOST: localhost
+      MQTT_PORT: "1883"
+      VEHICLE_ID: "vehicle-001"
+    depends_on:
+      databroker:
+        condition: service_started
+      mosquitto:
+        condition: service_started
+    network_mode: host
+    restart: on-failure
+
+  # ── M3: ROS2 Bridge ─────────────────────────────────────────────────────────
+  #
+  # The AD-stack gateway service.
+  # Subscribes to Kuksa Databroker via gRPC streaming (same pattern as
+  # mqtt-bridge) and publishes each signal update as a ROS2 topic using DDS.
+  #
+  # SDV Concept:
+  #   Two middleware paradigms coexist in modern SDV platforms:
+  #     Kuksa / VSS  → vehicle signal layer (ECU integration, OBD, AUTOSAR)
+  #     ROS2 / DDS   → autonomous driving layer (perception, planning, control)
+  #   This bridge is the interface between the two worlds.
+  #
+  # ROS2 topics published:
+  #   /vehicle/speed              ← Vehicle.Speed
+  #   /vehicle/battery/soc        ← Vehicle.Powertrain.TractionBattery.StateOfCharge.Current
+  #   /vehicle/cabin/temperature  ← Vehicle.Cabin.HVAC.AmbientAirTemperature
+  #
+  # DDS: CycloneDDS with multicast (works on shared loopback via host networking).
+  ros2-bridge:
+    build:
+      context: ./services/ros2-bridge
+      dockerfile: Dockerfile
+    environment:
+      DATABROKER_HOST: localhost
+      DATABROKER_PORT: "55555"
+      ROS_DOMAIN_ID: "0"
+      <<: *cyclonedds-config
+    depends_on:
+      databroker:
+        condition: service_started
+    network_mode: host
+    restart: on-failure
+
+  # ── M3: ROS2 Subscriber ─────────────────────────────────────────────────────
+  #
+  # Verification-only service. Subscribes to all three /vehicle/* ROS2 topics
+  # and logs each received message.
+  #
+  # Verify M3 end-to-end:
+  #   docker compose logs -f ros2-subscriber
+  #
+  # Expected output:
+  #   [/vehicle/speed] value=87.3
+  #   [/vehicle/battery/soc] value=72.4
+  #   [/vehicle/cabin/temperature] value=22.1
+  #
+  # Real-world equivalent: any ROS2-native AD node (path planner,
+  # emergency-braking controller, sensor-fusion node) that subscribes
+  # to /vehicle/speed or /vehicle/battery/soc to make driving decisions.
+  ros2-subscriber:
+    build:
+      context: ./services/ros2-subscriber
+      dockerfile: Dockerfile
+    environment:
+      ROS_DOMAIN_ID: "0"
+      <<: *cyclonedds-config
+    depends_on:
+      ros2-bridge:
+        condition: service_started
+    network_mode: host
+    restart: on-failure

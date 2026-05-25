@@ -39,4 +39,24 @@
       },
       "Cabin": {
         "type": "branch",
-        "description": "Signals related to the
+        "description": "Signals related to the passenger cabin environment.",
+        "children": {
+          "HVAC": {
+            "type": "branch",
+            "description": "Heating, Ventilation and Air Conditioning signals. Sources: HVAC Controller ECU.",
+            "children": {
+              "AmbientAirTemperature": {
+                "datatype": "float",
+                "type": "sensor",
+                "unit": "celsius",
+                "min": -40,
+                "max": 100,
+                "description": "Current measured cabin ambient air temperature. Reported by the HVAC Controller via an interior NTC thermistor. COVESA VSS 4.x standard path: Vehicle.Cabin.HVAC.AmbientAirTemperature."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
