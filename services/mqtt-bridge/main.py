@@ -48,6 +48,11 @@ from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 from kuksa_client.grpc import VSSClient
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -67,6 +72,8 @@ MQTT_TLS         = os.environ.get("MQTT_TLS", "false").lower() == "true"
 MQTT_CA_CERT     = os.environ.get("MQTT_CA_CERT", "/certs/ca.crt")
 MQTT_CLIENT_CERT = os.environ.get("MQTT_CLIENT_CERT", "/certs/client.crt")
 MQTT_CLIENT_KEY  = os.environ.get("MQTT_CLIENT_KEY", "/certs/client.key")
+OTEL_ENABLED     = os.environ.get("OTEL_ENABLED", "false").lower() == "true"
+OTEL_ENDPOINT    = os.environ.get("OTEL_ENDPOINT", "http://localhost:4317")
 
 # ── Signal metadata (COVESA VSS 4.x standard paths — migrated in M3) ─────────
 # Unit strings match the VSS catalog definitions in vss_mini_covesa.json.
@@ -125,6 +132,24 @@ def make_payload(vss_path: str, value: float) -> str:
 
 # ── MQTT connection ───────────────────────────────────────────────────────────
 
+def setup_tracing(service_name: str) -> trace.Tracer:
+    """
+    Returns a configured OTLP tracer when OTEL_ENABLED=true, NoOp otherwise.
+    NoOp tracer: start_as_current_span() is a zero-overhead context manager.
+    This lets instrumentation code stay in place without any runtime cost
+    when tracing is disabled (e.g., in plain development mode).
+    """
+    if not OTEL_ENABLED:
+        return trace.get_tracer(service_name)
+    resource = Resource.create({"service.name": service_name})
+    provider = TracerProvider(resource=resource)
+    exporter = OTLPSpanExporter(endpoint=OTEL_ENDPOINT)
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+    log.info(f"OpenTelemetry tracing enabled → {OTEL_ENDPOINT}")
+    return trace.get_tracer(service_name)
+
+
 def apply_tls(client: mqtt.Client) -> None:
     if not MQTT_TLS:
         return
@@ -178,6 +203,7 @@ def run() -> None:
     Cloud-native pattern: handle transient failures inside the process so
     Docker's restart policy is a last resort, not the primary recovery path.
     """
+    tracer = setup_tracing("mqtt-bridge")
     retry_delay = 2.0
 
     while True:
@@ -221,12 +247,20 @@ def run() -> None:
                         topic   = vss_to_topic(path)
                         payload = make_payload(path, value)
 
-                        # QoS 0 — at most once (fire and forget).
-                        # Suitable for high-frequency telemetry where an
-                        # occasional lost message is acceptable.
-                        # QoS 1 (at least once) would be appropriate for
-                        # safety-relevant signals in a production system.
-                        mqtt_client.publish(topic, payload, qos=0)
+                        # One trace span per signal update — captures the
+                        # full forward latency from Kuksa receive to MQTT publish.
+                        with tracer.start_as_current_span("signal.forward") as span:
+                            span.set_attribute("vehicle.id",   VEHICLE_ID)
+                            span.set_attribute("signal.path",  path)
+                            span.set_attribute("signal.value", value)
+                            span.set_attribute("mqtt.topic",   topic)
+
+                            # QoS 0 — at most once (fire and forget).
+                            # Suitable for high-frequency telemetry where an
+                            # occasional lost message is acceptable.
+                            # QoS 1 (at least once) would be appropriate for
+                            # safety-relevant signals in a production system.
+                            mqtt_client.publish(topic, payload, qos=0)
 
                         log.info(
                             f"Published → {topic} "

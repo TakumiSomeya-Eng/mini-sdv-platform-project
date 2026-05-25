@@ -36,6 +36,11 @@ import urllib.request
 from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt_client
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -54,6 +59,8 @@ MQTT_TLS         = os.environ.get("MQTT_TLS", "false").lower() == "true"
 MQTT_CA_CERT     = os.environ.get("MQTT_CA_CERT", "/certs/ca.crt")
 MQTT_CLIENT_CERT = os.environ.get("MQTT_CLIENT_CERT", "/certs/client.crt")
 MQTT_CLIENT_KEY  = os.environ.get("MQTT_CLIENT_KEY", "/certs/client.key")
+OTEL_ENABLED     = os.environ.get("OTEL_ENABLED", "false").lower() == "true"
+OTEL_ENDPOINT    = os.environ.get("OTEL_ENDPOINT", "http://localhost:4317")
 POLL_INTERVAL   = int(os.environ.get("POLL_INTERVAL_SEC", "30"))
 ECU_CONFIG_PATH = os.environ.get("ECU_CONFIG_PATH", "/shared/ecu_config.json")
 STATE_FILE      = os.environ.get("OTA_STATE_FILE", "/tmp/ota_state.json")
@@ -78,6 +85,18 @@ def save_installed_version(version: str) -> None:
 
 
 # ── MQTT ──────────────────────────────────────────────────────────────────────
+
+def setup_tracing(service_name: str) -> trace.Tracer:
+    if not OTEL_ENABLED:
+        return trace.get_tracer(service_name)
+    resource = Resource.create({"service.name": service_name})
+    provider = TracerProvider(resource=resource)
+    exporter = OTLPSpanExporter(endpoint=OTEL_ENDPOINT)
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+    log.info(f"OpenTelemetry tracing enabled → {OTEL_ENDPOINT}")
+    return trace.get_tracer(service_name)
+
 
 def apply_tls(client: mqtt_client.Client) -> None:
     if not MQTT_TLS:
@@ -185,88 +204,111 @@ def run() -> None:
     log.info(f"  Poll interval:  {POLL_INTERVAL}s")
     log.info(f"  ECU config:     {ECU_CONFIG_PATH}")
 
+    tracer = setup_tracing("ota-manager")
     os.makedirs(STAGING_DIR, exist_ok=True)
     mqtt = connect_mqtt()
 
     while True:
         installed = get_installed_version()
 
-        # ── CHECK ────────────────────────────────────────────────────────
-        publish_status(mqtt, "check", installed_version=installed)
-        manifest = fetch_manifest()
+        with tracer.start_as_current_span("ota.check.cycle") as root_span:
+            root_span.set_attribute("vehicle.id",            VEHICLE_ID)
+            root_span.set_attribute("ota.installed_version", installed)
 
-        if manifest is None:
-            time.sleep(POLL_INTERVAL)
-            continue
+            # ── CHECK ────────────────────────────────────────────────────────
+            publish_status(mqtt, "check", installed_version=installed)
+            with tracer.start_as_current_span("manifest.fetch") as span:
+                manifest = fetch_manifest()
+                span.set_attribute("manifest.ok", manifest is not None)
 
-        latest = manifest.get("latest_version", "")
-        pkg_info = next(
-            (p for p in manifest.get("packages", []) if p["version"] == latest),
-            None,
-        )
+            if manifest is None:
+                time.sleep(POLL_INTERVAL)
+                continue
 
-        if not latest or latest <= installed or pkg_info is None:
-            log.info(f"[CHECK] Up to date. installed={installed} latest={latest}")
-            time.sleep(POLL_INTERVAL)
-            continue
+            latest = manifest.get("latest_version", "")
+            pkg_info = next(
+                (p for p in manifest.get("packages", []) if p["version"] == latest),
+                None,
+            )
 
-        log.info(f"[CHECK] Update available: {installed} → {latest}")
-        publish_status(
-            mqtt, "downloading",
-            from_version=installed,
-            to_version=latest,
-            changelog=pkg_info.get("changelog", ""),
-        )
+            if not latest or latest <= installed or pkg_info is None:
+                log.info(f"[CHECK] Up to date. installed={installed} latest={latest}")
+                time.sleep(POLL_INTERVAL)
+                continue
 
-        # ── DOWNLOAD ─────────────────────────────────────────────────────
-        pkg_path = os.path.join(STAGING_DIR, f"{latest}.tar.gz")
-        if not download_package(pkg_info["url"], pkg_path):
-            publish_status(mqtt, "error", version=latest, reason="download_failed")
-            time.sleep(POLL_INTERVAL)
-            continue
-
-        # ── VERIFY ───────────────────────────────────────────────────────
-        publish_status(mqtt, "verifying", version=latest)
-        actual_hash   = sha256_file(pkg_path)
-        expected_hash = pkg_info.get("sha256", "")
-
-        if actual_hash != expected_hash:
-            os.remove(pkg_path)
+            log.info(f"[CHECK] Update available: {installed} → {latest}")
+            root_span.set_attribute("ota.latest_version", latest)
             publish_status(
-                mqtt, "error",
-                version=latest,
-                reason="hash_mismatch",
-                rollback=True,
-                expected=expected_hash[:16] + "…",
-                actual=actual_hash[:16] + "…",
+                mqtt, "downloading",
+                from_version=installed,
+                to_version=latest,
+                changelog=pkg_info.get("changelog", ""),
             )
-            log.error(
-                f"[VERIFY] Hash mismatch — rollback. "
-                f"expected={expected_hash[:16]}… got={actual_hash[:16]}…"
-            )
-            time.sleep(POLL_INTERVAL)
-            continue
 
-        log.info(f"[VERIFY] Hash OK: {actual_hash[:16]}…")
+            # ── DOWNLOAD ─────────────────────────────────────────────────────
+            pkg_path = os.path.join(STAGING_DIR, f"{latest}.tar.gz")
+            with tracer.start_as_current_span("package.download") as span:
+                span.set_attribute("ota.version", latest)
+                ok = download_package(pkg_info["url"], pkg_path)
+                span.set_attribute("download.ok", ok)
+            if not ok:
+                publish_status(mqtt, "error", version=latest, reason="download_failed")
+                time.sleep(POLL_INTERVAL)
+                continue
 
-        # ── APPLY ────────────────────────────────────────────────────────
-        publish_status(mqtt, "installing", version=latest, previous_version=installed)
+            # ── VERIFY ───────────────────────────────────────────────────────
+            publish_status(mqtt, "verifying", version=latest)
+            with tracer.start_as_current_span("package.verify") as span:
+                actual_hash   = sha256_file(pkg_path)
+                expected_hash = pkg_info.get("sha256", "")
+                hash_ok       = actual_hash == expected_hash
+                span.set_attribute("ota.version",  latest)
+                span.set_attribute("ota.hash_ok",  hash_ok)
 
-        if not apply_package(pkg_path):
-            publish_status(mqtt, "error", version=latest, reason="apply_failed")
-            time.sleep(POLL_INTERVAL)
-            continue
+            if not hash_ok:
+                os.remove(pkg_path)
+                publish_status(
+                    mqtt, "error",
+                    version=latest,
+                    reason="hash_mismatch",
+                    rollback=True,
+                    expected=expected_hash[:16] + "…",
+                    actual=actual_hash[:16] + "…",
+                )
+                log.error(
+                    f"[VERIFY] Hash mismatch — rollback. "
+                    f"expected={expected_hash[:16]}… got={actual_hash[:16]}…"
+                )
+                time.sleep(POLL_INTERVAL)
+                continue
 
-        # ── REPORT ───────────────────────────────────────────────────────
-        save_installed_version(latest)
-        os.remove(pkg_path)
-        publish_status(
-            mqtt, "complete",
-            version=latest,
-            previous_version=installed,
-            changelog=pkg_info.get("changelog", ""),
-        )
-        log.info(f"[COMPLETE] OTA {installed} → {latest} successful.")
+            log.info(f"[VERIFY] Hash OK: {actual_hash[:16]}…")
+
+            # ── APPLY ────────────────────────────────────────────────────────
+            publish_status(mqtt, "installing", version=latest, previous_version=installed)
+            with tracer.start_as_current_span("package.apply") as span:
+                span.set_attribute("ota.version", latest)
+                applied = apply_package(pkg_path)
+                span.set_attribute("apply.ok", applied)
+
+            if not applied:
+                publish_status(mqtt, "error", version=latest, reason="apply_failed")
+                time.sleep(POLL_INTERVAL)
+                continue
+
+            # ── REPORT ───────────────────────────────────────────────────────
+            save_installed_version(latest)
+            os.remove(pkg_path)
+            with tracer.start_as_current_span("mqtt.publish") as span:
+                span.set_attribute("mqtt.topic",  STATUS_TOPIC)
+                span.set_attribute("ota.version", latest)
+                publish_status(
+                    mqtt, "complete",
+                    version=latest,
+                    previous_version=installed,
+                    changelog=pkg_info.get("changelog", ""),
+                )
+            log.info(f"[COMPLETE] OTA {installed} → {latest} successful.")
 
         time.sleep(POLL_INTERVAL)
 

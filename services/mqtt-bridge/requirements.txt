@@ -1,2 +1,4 @@
 kuksa-client==0.4.3
 paho-mqtt==1.6.1
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http

@@ -27,6 +27,11 @@ from datetime import datetime, timezone
 import anthropic
 import paho.mqtt.client as mqtt_client
 from kuksa_client.grpc import VSSClient
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -46,6 +51,8 @@ MQTT_TLS             = os.environ.get("MQTT_TLS", "false").lower() == "true"
 MQTT_CA_CERT         = os.environ.get("MQTT_CA_CERT", "/certs/ca.crt")
 MQTT_CLIENT_CERT     = os.environ.get("MQTT_CLIENT_CERT", "/certs/client.crt")
 MQTT_CLIENT_KEY      = os.environ.get("MQTT_CLIENT_KEY", "/certs/client.key")
+OTEL_ENABLED         = os.environ.get("OTEL_ENABLED", "false").lower() == "true"
+OTEL_ENDPOINT        = os.environ.get("OTEL_ENDPOINT", "http://localhost:4317")
 MONITOR_INTERVAL_SEC = float(os.environ.get("MONITOR_INTERVAL_SEC", "10"))
 HISTORY_WINDOW       = int(os.environ.get("HISTORY_WINDOW", "10"))
 ANTHROPIC_API_KEY    = os.environ["ANTHROPIC_API_KEY"]
@@ -107,6 +114,18 @@ def poll_databroker() -> dict[str, float | None]:
 
 
 # ── MQTT Connection ───────────────────────────────────────────────────────────
+
+def setup_tracing(service_name: str) -> trace.Tracer:
+    if not OTEL_ENABLED:
+        return trace.get_tracer(service_name)
+    resource = Resource.create({"service.name": service_name})
+    provider = TracerProvider(resource=resource)
+    exporter = OTLPSpanExporter(endpoint=OTEL_ENDPOINT)
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+    log.info(f"OpenTelemetry tracing enabled → {OTEL_ENDPOINT}")
+    return trace.get_tracer(service_name)
+
 
 def apply_tls(client: mqtt_client.Client) -> None:
     if not MQTT_TLS:
@@ -172,61 +191,77 @@ def run() -> None:
     log.info(f"  MQTT:       {MQTT_HOST}:{MQTT_PORT}  topic={ALERT_TOPIC}")
     log.info(f"  Interval:   {MONITOR_INTERVAL_SEC}s  |  History: {HISTORY_WINDOW} readings")
 
+    tracer    = setup_tracing("ai-monitor")
     ai_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    mqtt       = connect_mqtt()
-    history    = {path: deque(maxlen=HISTORY_WINDOW) for path in SIGNAL_PATHS}
+    mqtt      = connect_mqtt()
+    history   = {path: deque(maxlen=HISTORY_WINDOW) for path in SIGNAL_PATHS}
 
     while True:
-        # ── OBSERVE ─────────────────────────────────────────────────────
-        log.info("[OBSERVE] Polling Databroker for current signal values...")
-        values = poll_databroker()
+        with tracer.start_as_current_span("ai.monitor.cycle") as root_span:
+            root_span.set_attribute("vehicle.id", VEHICLE_ID)
 
-        for path, val in values.items():
-            if val is not None:
-                history[path].append(round(val, 3))
+            # ── OBSERVE ─────────────────────────────────────────────────────
+            log.info("[OBSERVE] Polling Databroker for current signal values...")
+            with tracer.start_as_current_span("databroker.poll") as span:
+                values = poll_databroker()
+                span.set_attribute("signal.count",
+                    sum(1 for v in values.values() if v is not None))
 
-        has_data = all(len(history[p]) > 0 for p in SIGNAL_PATHS)
-        if not has_data:
-            log.info("[OBSERVE] Waiting for signal data — ECU simulator not running yet?")
-            time.sleep(MONITOR_INTERVAL_SEC)
-            continue
+            for path, val in values.items():
+                if val is not None:
+                    history[path].append(round(val, 3))
 
-        latest = {p: history[p][-1] for p in SIGNAL_PATHS}
-        log.info(
-            f"[OBSERVE] Speed={latest['Vehicle.Speed']} km/h | "
-            f"SoC={latest['Vehicle.Powertrain.TractionBattery.StateOfCharge.Current']} % | "
-            f"Temp={latest['Vehicle.Cabin.HVAC.AmbientAirTemperature']} °C"
-        )
+            has_data = all(len(history[p]) > 0 for p in SIGNAL_PATHS)
+            if not has_data:
+                log.info("[OBSERVE] Waiting for signal data — ECU simulator not running yet?")
+                time.sleep(MONITOR_INTERVAL_SEC)
+                continue
 
-        # ── REASON ──────────────────────────────────────────────────────
-        log.info("[REASON] Sending signal history to Claude API...")
-        result = call_llm(ai_client, history)
-
-        if result is None:
-            time.sleep(MONITOR_INTERVAL_SEC)
-            continue
-
-        log.info(
-            f"[REASON] anomaly={result.get('anomaly')} "
-            f"severity={result.get('severity')} — {result.get('explanation', '')}"
-        )
-
-        # ── ACT ─────────────────────────────────────────────────────────
-        if result.get("anomaly"):
-            alert = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "anomaly":     result["anomaly"],
-                "severity":    result.get("severity", "warning"),
-                "explanation": result.get("explanation", ""),
-                "signals":     result.get("signals", latest),
-            }
-            payload = json.dumps(alert)
-            mqtt.publish(ALERT_TOPIC, payload, qos=0)
-            log.warning(
-                f"[ACT] ALERT published → {alert['severity'].upper()}: {alert['explanation']}"
+            latest = {p: history[p][-1] for p in SIGNAL_PATHS}
+            log.info(
+                f"[OBSERVE] Speed={latest['Vehicle.Speed']} km/h | "
+                f"SoC={latest['Vehicle.Powertrain.TractionBattery.StateOfCharge.Current']} % | "
+                f"Temp={latest['Vehicle.Cabin.HVAC.AmbientAirTemperature']} °C"
             )
-        else:
-            log.info("[ACT] No anomaly — no MQTT publish.")
+
+            # ── REASON ──────────────────────────────────────────────────────
+            log.info("[REASON] Sending signal history to Claude API...")
+            result = None
+            with tracer.start_as_current_span("claude.api.call") as span:
+                span.set_attribute("ai.model", "claude-haiku-4-5-20251001")
+                result = call_llm(ai_client, history)
+                if result:
+                    span.set_attribute("ai.anomaly",  result.get("anomaly", False))
+                    span.set_attribute("ai.severity", result.get("severity", "info"))
+
+            if result is None:
+                time.sleep(MONITOR_INTERVAL_SEC)
+                continue
+
+            log.info(
+                f"[REASON] anomaly={result.get('anomaly')} "
+                f"severity={result.get('severity')} — {result.get('explanation', '')}"
+            )
+
+            # ── ACT ─────────────────────────────────────────────────────────
+            if result.get("anomaly"):
+                alert = {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "anomaly":     result["anomaly"],
+                    "severity":    result.get("severity", "warning"),
+                    "explanation": result.get("explanation", ""),
+                    "signals":     result.get("signals", latest),
+                }
+                payload = json.dumps(alert)
+                with tracer.start_as_current_span("mqtt.publish") as span:
+                    span.set_attribute("mqtt.topic",  ALERT_TOPIC)
+                    span.set_attribute("ai.severity", alert["severity"])
+                    mqtt.publish(ALERT_TOPIC, payload, qos=0)
+                log.warning(
+                    f"[ACT] ALERT published → {alert['severity'].upper()}: {alert['explanation']}"
+                )
+            else:
+                log.info("[ACT] No anomaly — no MQTT publish.")
 
         time.sleep(MONITOR_INTERVAL_SEC)
 
