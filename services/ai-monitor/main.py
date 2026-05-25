@@ -42,6 +42,10 @@ DATABROKER_PORT      = int(os.environ.get("DATABROKER_PORT", "55555"))
 MQTT_HOST            = os.environ.get("MQTT_HOST", "localhost")
 MQTT_PORT            = int(os.environ.get("MQTT_PORT", "1883"))
 VEHICLE_ID           = os.environ.get("VEHICLE_ID", "vehicle-001")
+MQTT_TLS             = os.environ.get("MQTT_TLS", "false").lower() == "true"
+MQTT_CA_CERT         = os.environ.get("MQTT_CA_CERT", "/certs/ca.crt")
+MQTT_CLIENT_CERT     = os.environ.get("MQTT_CLIENT_CERT", "/certs/client.crt")
+MQTT_CLIENT_KEY      = os.environ.get("MQTT_CLIENT_KEY", "/certs/client.key")
 MONITOR_INTERVAL_SEC = float(os.environ.get("MONITOR_INTERVAL_SEC", "10"))
 HISTORY_WINDOW       = int(os.environ.get("HISTORY_WINDOW", "10"))
 ANTHROPIC_API_KEY    = os.environ["ANTHROPIC_API_KEY"]
@@ -104,8 +108,19 @@ def poll_databroker() -> dict[str, float | None]:
 
 # ── MQTT Connection ───────────────────────────────────────────────────────────
 
+def apply_tls(client: mqtt_client.Client) -> None:
+    if not MQTT_TLS:
+        return
+    client.tls_set(
+        ca_certs=MQTT_CA_CERT,
+        certfile=MQTT_CLIENT_CERT,
+        keyfile=MQTT_CLIENT_KEY,
+    )
+
+
 def connect_mqtt() -> mqtt_client.Client:
     client = mqtt_client.Client(client_id="ai-monitor")
+    apply_tls(client)
     retry_delay = 2.0
     while True:
         try:

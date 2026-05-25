@@ -38,3 +38,6 @@ desktop.ini
 
 # Streamlit cache
 .streamlit/
+
+# TLS certificates (private keys must not be committed)
+config/certs/

@@ -47,9 +47,13 @@ log = logging.getLogger("ota-manager")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 OTA_SERVER_URL  = os.environ.get("OTA_SERVER_URL", "http://localhost:8080")
-MQTT_HOST       = os.environ.get("MQTT_HOST", "localhost")
-MQTT_PORT       = int(os.environ.get("MQTT_PORT", "1883"))
-VEHICLE_ID      = os.environ.get("VEHICLE_ID", "vehicle-001")
+MQTT_HOST        = os.environ.get("MQTT_HOST", "localhost")
+MQTT_PORT        = int(os.environ.get("MQTT_PORT", "1883"))
+VEHICLE_ID       = os.environ.get("VEHICLE_ID", "vehicle-001")
+MQTT_TLS         = os.environ.get("MQTT_TLS", "false").lower() == "true"
+MQTT_CA_CERT     = os.environ.get("MQTT_CA_CERT", "/certs/ca.crt")
+MQTT_CLIENT_CERT = os.environ.get("MQTT_CLIENT_CERT", "/certs/client.crt")
+MQTT_CLIENT_KEY  = os.environ.get("MQTT_CLIENT_KEY", "/certs/client.key")
 POLL_INTERVAL   = int(os.environ.get("POLL_INTERVAL_SEC", "30"))
 ECU_CONFIG_PATH = os.environ.get("ECU_CONFIG_PATH", "/shared/ecu_config.json")
 STATE_FILE      = os.environ.get("OTA_STATE_FILE", "/tmp/ota_state.json")
@@ -75,8 +79,19 @@ def save_installed_version(version: str) -> None:
 
 # ── MQTT ──────────────────────────────────────────────────────────────────────
 
+def apply_tls(client: mqtt_client.Client) -> None:
+    if not MQTT_TLS:
+        return
+    client.tls_set(
+        ca_certs=MQTT_CA_CERT,
+        certfile=MQTT_CLIENT_CERT,
+        keyfile=MQTT_CLIENT_KEY,
+    )
+
+
 def connect_mqtt() -> mqtt_client.Client:
     client = mqtt_client.Client(client_id="ota-manager")
+    apply_tls(client)
     retry = 2.0
     while True:
         try:

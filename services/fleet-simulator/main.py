@@ -41,8 +41,12 @@ logging.basicConfig(
 log = logging.getLogger("fleet-simulator")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-MQTT_HOST       = os.environ.get("MQTT_HOST", "localhost")
-MQTT_PORT       = int(os.environ.get("MQTT_PORT", "1883"))
+MQTT_HOST        = os.environ.get("MQTT_HOST", "localhost")
+MQTT_PORT        = int(os.environ.get("MQTT_PORT", "1883"))
+MQTT_TLS         = os.environ.get("MQTT_TLS", "false").lower() == "true"
+MQTT_CA_CERT     = os.environ.get("MQTT_CA_CERT", "/certs/ca.crt")
+MQTT_CLIENT_CERT = os.environ.get("MQTT_CLIENT_CERT", "/certs/client.crt")
+MQTT_CLIENT_KEY  = os.environ.get("MQTT_CLIENT_KEY", "/certs/client.key")
 INFLUXDB_URL    = os.environ.get("INFLUXDB_URL", "http://localhost:8086")
 INFLUXDB_TOKEN  = os.environ.get("INFLUXDB_TOKEN", "sdv-token-local")
 INFLUXDB_ORG    = os.environ.get("INFLUXDB_ORG", "sdv-org")
@@ -99,11 +103,22 @@ class VehicleState:
 
 # ── Connection helpers ────────────────────────────────────────────────────────
 
+def apply_tls(client: mqtt_client.Client) -> None:
+    if not MQTT_TLS:
+        return
+    client.tls_set(
+        ca_certs=MQTT_CA_CERT,
+        certfile=MQTT_CLIENT_CERT,
+        keyfile=MQTT_CLIENT_KEY,
+    )
+
+
 def connect_mqtt() -> mqtt_client.Client:
     retry = 2.0
     while True:
         try:
             client = mqtt_client.Client(client_id=f"fleet-simulator")
+            apply_tls(client)
             client.connect(MQTT_HOST, MQTT_PORT)
             client.loop_start()
             log.info(f"MQTT connected → {MQTT_HOST}:{MQTT_PORT}")

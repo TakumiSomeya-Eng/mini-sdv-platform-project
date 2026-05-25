@@ -56,9 +56,13 @@ HISTORY_MAX      = 60    # rolling window size (60 samples ≈ 60 s at 1 Hz)
 # M2: MQTT bridge display config.
 # The dashboard does not connect to Mosquitto directly (FR-81).
 # These vars are used to show the bridge endpoint in the sidebar only.
-MQTT_HOST  = os.environ.get("MQTT_HOST", "mosquitto")
-MQTT_PORT  = int(os.environ.get("MQTT_PORT", "1883"))
-VEHICLE_ID = os.environ.get("VEHICLE_ID", "vehicle-001")
+MQTT_HOST        = os.environ.get("MQTT_HOST", "mosquitto")
+MQTT_PORT        = int(os.environ.get("MQTT_PORT", "1883"))
+VEHICLE_ID       = os.environ.get("VEHICLE_ID", "vehicle-001")
+MQTT_TLS         = os.environ.get("MQTT_TLS", "false").lower() == "true"
+MQTT_CA_CERT     = os.environ.get("MQTT_CA_CERT", "/certs/ca.crt")
+MQTT_CLIENT_CERT = os.environ.get("MQTT_CLIENT_CERT", "/certs/client.crt")
+MQTT_CLIENT_KEY  = os.environ.get("MQTT_CLIENT_KEY", "/certs/client.key")
 
 # ── Signal Metadata (COVESA VSS 4.x standard paths — migrated in M3) ─────────
 # Maps each VSS path to its display properties.
@@ -255,6 +259,16 @@ def render_charts() -> None:
         st.divider()
 
 
+def apply_tls(client: mqtt_client.Client) -> None:
+    if not MQTT_TLS:
+        return
+    client.tls_set(
+        ca_certs=MQTT_CA_CERT,
+        certfile=MQTT_CLIENT_CERT,
+        keyfile=MQTT_CLIENT_KEY,
+    )
+
+
 def init_mqtt_alert_listener() -> None:
     """
     Subscribe to the AI monitor alert topic in a background MQTT thread.
@@ -278,6 +292,7 @@ def init_mqtt_alert_listener() -> None:
             except Exception:
                 pass
         client.on_message = on_message
+        apply_tls(client)
         client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
         client.subscribe(AI_ALERT_TOPIC)
         client.subscribe(OTA_STATUS_TOPIC)

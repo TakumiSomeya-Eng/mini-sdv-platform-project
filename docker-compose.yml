@@ -92,8 +92,14 @@ services:
       DATABROKER_HOST: localhost
       DATABROKER_PORT: "55555"
       MQTT_HOST: localhost
-      MQTT_PORT: "1883"
+      MQTT_PORT: "8883"
+      MQTT_TLS: "true"
+      MQTT_CA_CERT: /certs/ca.crt
+      MQTT_CLIENT_CERT: /certs/client.crt
+      MQTT_CLIENT_KEY: /certs/client.key
       VEHICLE_ID: "vehicle-001"
+    volumes:
+      - ./config/certs:/certs:ro
     depends_on:
       databroker:
         condition: service_started
@@ -117,6 +123,7 @@ services:
     image: eclipse-mosquitto:2.0
     volumes:
       - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./config/certs:/mosquitto/certs:ro
     network_mode: host
     restart: on-failure
 
@@ -138,8 +145,14 @@ services:
       DATABROKER_HOST: localhost
       DATABROKER_PORT: "55555"
       MQTT_HOST: localhost
-      MQTT_PORT: "1883"
+      MQTT_PORT: "8883"
+      MQTT_TLS: "true"
+      MQTT_CA_CERT: /certs/ca.crt
+      MQTT_CLIENT_CERT: /certs/client.crt
+      MQTT_CLIENT_KEY: /certs/client.key
       VEHICLE_ID: "vehicle-001"
+    volumes:
+      - ./config/certs:/certs:ro
     depends_on:
       databroker:
         condition: service_started
@@ -274,12 +287,17 @@ services:
     environment:
       OTA_SERVER_URL: http://localhost:8080
       MQTT_HOST: localhost
-      MQTT_PORT: "1883"
+      MQTT_PORT: "8883"
+      MQTT_TLS: "true"
+      MQTT_CA_CERT: /certs/ca.crt
+      MQTT_CLIENT_CERT: /certs/client.crt
+      MQTT_CLIENT_KEY: /certs/client.key
       VEHICLE_ID: "vehicle-001"
       POLL_INTERVAL_SEC: "30"
       ECU_CONFIG_PATH: /shared/ecu_config.json
     volumes:
       - /tmp/sdv-ota:/shared
+      - ./config/certs:/certs:ro
     depends_on:
       - ota-server
       - mosquitto
@@ -389,12 +407,18 @@ services:
       dockerfile: Dockerfile
     environment:
       MQTT_HOST: localhost
-      MQTT_PORT: "1883"
+      MQTT_PORT: "8883"
+      MQTT_TLS: "true"
+      MQTT_CA_CERT: /certs/ca.crt
+      MQTT_CLIENT_CERT: /certs/client.crt
+      MQTT_CLIENT_KEY: /certs/client.key
       INFLUXDB_URL: http://localhost:8086
       INFLUXDB_TOKEN: sdv-token-local
       INFLUXDB_ORG: sdv-org
       INFLUXDB_BUCKET: sdv
       INTERVAL_SEC: "2"
+    volumes:
+      - ./config/certs:/certs:ro
     depends_on:
       - mosquitto
       - influxdb
@@ -412,11 +436,17 @@ services:
     environment:
       OTA_SERVER_URL: http://localhost:8080
       MQTT_HOST: localhost
-      MQTT_PORT: "1883"
+      MQTT_PORT: "8883"
+      MQTT_TLS: "true"
+      MQTT_CA_CERT: /certs/ca.crt
+      MQTT_CLIENT_CERT: /certs/client.crt
+      MQTT_CLIENT_KEY: /certs/client.key
       VEHICLE_ID: "vehicle-002"
       POLL_INTERVAL_SEC: "30"
       ECU_CONFIG_PATH: /tmp/ecu_config_v002.json
       OTA_STATE_FILE: /tmp/ota_state_v002.json
+    volumes:
+      - ./config/certs:/certs:ro
     depends_on:
       - ota-server
       - mosquitto
@@ -431,11 +461,17 @@ services:
     environment:
       OTA_SERVER_URL: http://localhost:8080
       MQTT_HOST: localhost
-      MQTT_PORT: "1883"
+      MQTT_PORT: "8883"
+      MQTT_TLS: "true"
+      MQTT_CA_CERT: /certs/ca.crt
+      MQTT_CLIENT_CERT: /certs/client.crt
+      MQTT_CLIENT_KEY: /certs/client.key
       VEHICLE_ID: "vehicle-003"
       POLL_INTERVAL_SEC: "30"
       ECU_CONFIG_PATH: /tmp/ecu_config_v003.json
       OTA_STATE_FILE: /tmp/ota_state_v003.json
+    volumes:
+      - ./config/certs:/certs:ro
     depends_on:
       - ota-server
       - mosquitto
@@ -452,11 +488,17 @@ services:
       DATABROKER_HOST: localhost
       DATABROKER_PORT: "55555"
       MQTT_HOST: localhost
-      MQTT_PORT: "1883"
+      MQTT_PORT: "8883"
+      MQTT_TLS: "true"
+      MQTT_CA_CERT: /certs/ca.crt
+      MQTT_CLIENT_CERT: /certs/client.crt
+      MQTT_CLIENT_KEY: /certs/client.key
       VEHICLE_ID: "vehicle-001"
       MONITOR_INTERVAL_SEC: "10"
       HISTORY_WINDOW: "10"
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    volumes:
+      - ./config/certs:/certs:ro
     depends_on:
       databroker:
         condition: service_started

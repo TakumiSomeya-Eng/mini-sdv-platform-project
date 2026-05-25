@@ -58,11 +58,15 @@ logging.basicConfig(
 log = logging.getLogger("mqtt-bridge")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-DATABROKER_HOST = os.environ.get("DATABROKER_HOST", "localhost")
-DATABROKER_PORT = int(os.environ.get("DATABROKER_PORT", "55555"))
-MQTT_HOST       = os.environ.get("MQTT_HOST", "localhost")
-MQTT_PORT       = int(os.environ.get("MQTT_PORT", "1883"))
-VEHICLE_ID      = os.environ.get("VEHICLE_ID", "vehicle-001")
+DATABROKER_HOST  = os.environ.get("DATABROKER_HOST", "localhost")
+DATABROKER_PORT  = int(os.environ.get("DATABROKER_PORT", "55555"))
+MQTT_HOST        = os.environ.get("MQTT_HOST", "localhost")
+MQTT_PORT        = int(os.environ.get("MQTT_PORT", "1883"))
+VEHICLE_ID       = os.environ.get("VEHICLE_ID", "vehicle-001")
+MQTT_TLS         = os.environ.get("MQTT_TLS", "false").lower() == "true"
+MQTT_CA_CERT     = os.environ.get("MQTT_CA_CERT", "/certs/ca.crt")
+MQTT_CLIENT_CERT = os.environ.get("MQTT_CLIENT_CERT", "/certs/client.crt")
+MQTT_CLIENT_KEY  = os.environ.get("MQTT_CLIENT_KEY", "/certs/client.key")
 
 # ── Signal metadata (COVESA VSS 4.x standard paths — migrated in M3) ─────────
 # Unit strings match the VSS catalog definitions in vss_mini_covesa.json.
@@ -121,6 +125,16 @@ def make_payload(vss_path: str, value: float) -> str:
 
 # ── MQTT connection ───────────────────────────────────────────────────────────
 
+def apply_tls(client: mqtt.Client) -> None:
+    if not MQTT_TLS:
+        return
+    client.tls_set(
+        ca_certs=MQTT_CA_CERT,
+        certfile=MQTT_CLIENT_CERT,
+        keyfile=MQTT_CLIENT_KEY,
+    )
+
+
 def connect_mqtt() -> mqtt.Client:
     """
     Create a paho-mqtt client and connect to Mosquitto.
@@ -144,6 +158,7 @@ def connect_mqtt() -> mqtt.Client:
         f"MQTT disconnected (rc={rc})"
     )
 
+    apply_tls(client)
     client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
     client.loop_start()
     return client
