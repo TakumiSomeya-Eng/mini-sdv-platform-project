@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "speed_min": 10.0,
+  "speed_max": 120.0,
+  "soc_start": 85.0,
+  "soc_drain_rate": 0.05,
+  "cabin_temp_min": 19.5,
+  "cabin_temp_max": 24.5,
+  "changelog": "Baseline ECU configuration."
+}

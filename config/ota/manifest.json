@@ -1,0 +1,17 @@
+{
+  "latest_version": "1.0.0",
+  "packages": [
+    {
+      "version": "1.0.0",
+      "url": "/packages/1.0.0.tar.gz",
+      "sha256": "3fb7f98813fc319877c02acd3d03011a2f8b99a7f653126d02270acfd13c6590",
+      "changelog": "Baseline ECU configuration. Speed: 10-120 km/h, SoC drain: 0.05%/cycle, Cabin: 19.5-24.5 C."
+    },
+    {
+      "version": "1.1.0",
+      "url": "/packages/1.1.0.tar.gz",
+      "sha256": "21474495df885bb58704d85823ac7c4aa0c0efe1fb15413d6a9402f621d2e0a8",
+      "changelog": "Performance update: extended speed range (20-150 km/h), optimized SoC drain (0.03%/cycle), wider cabin temp range (18-26 C)."
+    }
+  ]
+}

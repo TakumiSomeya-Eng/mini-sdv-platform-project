@@ -1,0 +1,10 @@
+{
+  "version": "1.1.0",
+  "speed_min": 20.0,
+  "speed_max": 150.0,
+  "soc_start": 85.0,
+  "soc_drain_rate": 0.03,
+  "cabin_temp_min": 18.0,
+  "cabin_temp_max": 26.0,
+  "changelog": "Performance update: extended speed range (20-150 km/h), optimized SoC drain rate, wider cabin temp range."
+}

@@ -93,6 +93,9 @@ SIGNAL_PATHS = list(SIGNALS.keys())
 # M5: AI monitor alert subscription
 AI_ALERT_TOPIC = f"sdv/{VEHICLE_ID}/alerts/ai"
 
+# M6: OTA status subscription
+OTA_STATUS_TOPIC = f"sdv/{VEHICLE_ID}/ota/status"
+
 
 # ── Session State ─────────────────────────────────────────────────────────────
 
@@ -115,6 +118,8 @@ def init_session_state() -> None:
         st.session_state.connected = False
     if "ai_alert" not in st.session_state:
         st.session_state.ai_alert = None
+    if "ota_status" not in st.session_state:
+        st.session_state.ota_status = None
     if "mqtt_subscribed" not in st.session_state:
         st.session_state.mqtt_subscribed = False
 
@@ -265,17 +270,72 @@ def init_mqtt_alert_listener() -> None:
         client = mqtt_client.Client(client_id="dashboard-alert-sub")
         def on_message(_client, _userdata, msg):
             try:
-                st.session_state.ai_alert = json.loads(msg.payload.decode())
+                data = json.loads(msg.payload.decode())
+                if msg.topic == AI_ALERT_TOPIC:
+                    st.session_state.ai_alert = data
+                elif msg.topic == OTA_STATUS_TOPIC:
+                    st.session_state.ota_status = data
             except Exception:
                 pass
         client.on_message = on_message
         client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
         client.subscribe(AI_ALERT_TOPIC)
+        client.subscribe(OTA_STATUS_TOPIC)
         client.loop_start()
         st.session_state.mqtt_subscribed = True
         log.info(f"Subscribed to AI alert topic: {AI_ALERT_TOPIC}")
     except Exception as exc:
         log.warning(f"AI alert MQTT subscription failed: {exc}")
+
+
+def render_ota_status() -> None:
+    """
+    OTA update status panel (M6).
+
+    Displays the latest OTA phase received from ota-manager via MQTT.
+    Phase colours: check/complete=green, downloading/verifying/installing=orange, error=red.
+    """
+    st.subheader("OTA Update Manager")
+    st.caption(f"Topic: {OTA_STATUS_TOPIC} · Poll interval: 30s")
+
+    status = st.session_state.ota_status
+    if status is None:
+        st.info("Waiting for OTA manager status…")
+        st.divider()
+        return
+
+    phase   = status.get("phase", "unknown")
+    version = status.get("version") or status.get("installed_version", "—")
+    ts      = status.get("timestamp", "—")
+
+    phase_config = {
+        "check":       ("✓ Up to date",   "success"),
+        "downloading": ("⬇ Downloading",  "warning"),
+        "verifying":   ("🔍 Verifying",   "warning"),
+        "installing":  ("⚙ Installing",   "warning"),
+        "complete":    ("✅ Complete",     "success"),
+        "error":       ("✗ Error",        "error"),
+    }
+    label, kind = phase_config.get(phase, (phase.upper(), "info"))
+
+    render_fn = {"success": st.success, "warning": st.warning,
+                 "error": st.error, "info": st.info}
+    render_fn.get(kind, st.info)(f"**{label}**  — version: `{version}`")
+
+    if phase == "complete":
+        prev = status.get("previous_version", "—")
+        changelog = status.get("changelog", "")
+        st.caption(f"Updated: {prev} → {version}")
+        if changelog:
+            st.caption(f"Changes: {changelog}")
+    elif phase == "error":
+        st.caption(f"Reason: {status.get('reason', '—')}  |  Rollback: {status.get('rollback', False)}")
+    elif phase == "downloading":
+        to_ver = status.get("to_version", "?")
+        st.caption(f"Fetching version {to_ver}…")
+
+    st.caption(f"Last update: {ts}")
+    st.divider()
 
 
 def render_ai_alert() -> None:
@@ -403,6 +463,7 @@ def main() -> None:
     render_metrics(values)
     st.divider()
     render_charts()
+    render_ota_status()
     render_ai_alert()
     render_sidebar()
 

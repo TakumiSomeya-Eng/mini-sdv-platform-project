@@ -30,7 +30,7 @@ This project simulates that architecture using Eclipse Kuksa as the VAL and Sock
 
 ---
 
-## Current Architecture (Milestone 5)
+## Current Architecture (Milestone 6)
 
 ```
   WSL2 Ubuntu (custom 6.18 kernel — SocketCAN support)
@@ -89,11 +89,12 @@ Dashboard (poll) ◀────────────────────
 MQTT Bridge (subscribe) → mosquitto :1883 → sdv/vehicle-001/Vehicle/Speed
 ROS2 Bridge (subscribe) → DDS → /vehicle/speed → ros2-subscriber
 AI Monitor (poll 10s) → Claude API → sdv/vehicle-001/alerts/ai → Dashboard AI panel
+OTA Server :8080 → OTA Manager (poll 30s) → /tmp/sdv-ota/ecu_config.json → ECU Simulator reload
 ```
 
 ---
 
-## Prerequisites (M5)
+## Prerequisites (M6)
 
 - **Windows 11** with WSL2
 - **WSL2 Ubuntu** (Ubuntu 24.04 or later)
@@ -105,7 +106,7 @@ AI Monitor (poll 10s) → Claude API → sdv/vehicle-001/alerts/ai → Dashboard
 
 ---
 
-## Quick Start (M5)
+## Quick Start (M6)
 
 All commands run in a **WSL2 Ubuntu terminal** unless noted.
 
@@ -129,7 +130,8 @@ docker compose up -d
 ~/sdv-venv/bin/python services/can-gateway/main.py
 
 # 5. Start the ECU Simulator (WSL2 terminal 2)
-~/sdv-venv/bin/python services/ecu-simulator/main.py
+#    ECU_CONFIG_PATH points to the shared OTA config directory
+ECU_CONFIG_PATH=/tmp/sdv-ota/ecu_config.json ~/sdv-venv/bin/python services/ecu-simulator/main.py
 
 # 6. Open the Dashboard (Windows browser)
 #    http://localhost:8501  — AI Signal Monitor panel at the bottom
@@ -143,6 +145,32 @@ candump vcan0
 # Kill CAN gateway and ECU simulator (Ctrl+C in their terminals), then:
 docker compose down
 ```
+
+---
+
+## Quick Test: M6 (OTA Update)
+
+```bash
+# 1. Check current manifest (latest_version should be 1.0.0)
+curl http://localhost:8080/manifest
+
+# 2. Subscribe to OTA status
+mosquitto_sub -h localhost -p 1883 -t "sdv/vehicle-001/ota/status" -v
+
+# 3. Release version 1.1.0 (triggers update on next poll cycle ≤30s)
+curl -X POST http://localhost:8080/release/1.1.0
+```
+
+Expected MQTT output (within 30 seconds):
+```
+sdv/vehicle-001/ota/status {"phase": "check", "installed_version": "1.0.0", ...}
+sdv/vehicle-001/ota/status {"phase": "downloading", "to_version": "1.1.0", ...}
+sdv/vehicle-001/ota/status {"phase": "verifying", "version": "1.1.0", ...}
+sdv/vehicle-001/ota/status {"phase": "installing", "version": "1.1.0", ...}
+sdv/vehicle-001/ota/status {"phase": "complete", "version": "1.1.0", ...}
+```
+
+After completion: Dashboard signal charts show speed range 20–150 km/h (was 10–120 km/h).
 
 ---
 
@@ -397,17 +425,37 @@ mini-sdv-platform/
 │   ├── mqtt-bridge/                    ← M2: Kuksa → MQTT forwarder
 │   ├── ros2-bridge/                    ← M3: Kuksa → ROS2 DDS forwarder
 │   ├── ros2-subscriber/                ← M3: ROS2 verification subscriber
-│   └── ai-monitor/                     ← M5: NEW — LLM anomaly detection agent
+│   ├── ai-monitor/                     ← M5: LLM anomaly detection agent
+│   │   ├── Dockerfile
+│   │   ├── main.py
+│   │   └── requirements.txt            ← anthropic + kuksa-client + paho-mqtt
+│   ├── ota-server/                     ← M6: NEW — OTA package registry (Flask)
+│   │   ├── Dockerfile
+│   │   ├── main.py
+│   │   └── requirements.txt            ← flask
+│   └── ota-manager/                    ← M6: NEW — vehicle-side OTA update agent
 │       ├── Dockerfile
 │       ├── main.py
-│       └── requirements.txt            ← anthropic + kuksa-client + paho-mqtt
+│       └── requirements.txt            ← paho-mqtt
+│
+├── config/
+│   ├── mosquitto/mosquitto.conf
+│   ├── vss/
+│   │   ├── vss_mini_covesa.json
+│   │   └── vss_mini.json
+│   └── ota/                            ← M6: NEW — OTA manifest + packages
+│       ├── manifest.json               ← version manifest (latest_version pointer)
+│       └── packages/
+│           ├── 1.0.0.tar.gz            ← baseline ECU config
+│           └── 1.1.0.tar.gz            ← performance update config
 │
 └── docs/
     ├── milestone-1/  PRD.md  FRD.md  TRD.md
     ├── milestone-2/  PRD.md  FRD.md  TRD.md
     ├── milestone-3/  PRD.md  FRD.md  TRD.md
     ├── milestone-4/  PRD.md  FRD.md  TRD.md
-    └── milestone-5/  PRD.md  FRD.md  TRD.md
+    ├── milestone-5/  PRD.md  FRD.md  TRD.md
+    └── milestone-6/  PRD.md  FRD.md  TRD.md
 ```
 
 ---
@@ -421,6 +469,7 @@ mini-sdv-platform/
 | **M3** ✅ | ROS2 integration | ROS2 Bridge, ROS2 Subscriber | DDS, brokerless pub/sub, COVESA VSS 4.x |
 | **M4** ✅ | Virtual CAN bus | CAN Gateway, SocketCAN ECUs | ISO 11898, CAN frames, Gateway ECU pattern |
 | **M5** ✅ | AI agent | AI Monitor, Claude API | LLM Observe→Reason→Act, anomaly detection |
+| **M6** ✅ | OTA updates | OTA Server, OTA Manager | UPTANE pattern, manifest, hash verification, ECU config reload |
 
 ---
 

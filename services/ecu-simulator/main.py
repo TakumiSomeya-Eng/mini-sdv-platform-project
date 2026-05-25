@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-ECU Simulator — mini-sdv-platform  Milestone 4
-===============================================
+ECU Simulator — mini-sdv-platform  Milestone 4 / M6 OTA
+=========================================================
 Simulates three vehicle ECUs publishing signals as CAN frames over vcan0.
 
   ECU                   CAN ID   Signal                                                     Unit
@@ -10,27 +10,15 @@ Simulates three vehicle ECUs publishing signals as CAN frames over vcan0.
   Battery Mgmt Sys   →  0x200    Vehicle.Powertrain.TractionBattery.StateOfCharge.Current   %
   HVAC Controller    →  0x300    Vehicle.Cabin.HVAC.AmbientAirTemperature                   °C
 
-M4 change:
-  M1–M3 published signals directly to the Kuksa Databroker via gRPC.
-  M4 publishes CAN frames to vcan0. A separate CAN Gateway service
-  reads these frames and forwards them to the Databroker — mirroring
-  the real vehicle architecture (ECU → CAN bus → Gateway ECU → Middleware).
-
-SDV concept:
-  In a real vehicle, an ECU never knows the Databroker exists.
-  It simply puts a CAN frame on the bus (ID + bytes).
-  The Gateway ECU is responsible for protocol translation.
-  This decoupling is what allows the middleware to be upgraded
-  without touching ECU firmware.
-
-CAN frame encoding:
-  Each signal value is packed as a 32-bit IEEE 754 float, little-endian.
-  This is a common encoding used in real automotive ECUs and is the
-  format expected by the CAN Gateway (services/can-gateway/main.py).
-
-  struct.pack('<f', 87.3) → b'\\xae\\x47\\xae\\x42'
+M6 addition:
+  Watches ECU_CONFIG_PATH for changes written by ota-manager.
+  When the config file is updated, reloads simulation parameters
+  (speed range, SoC drain rate, cabin temp range) without restarting.
+  This mirrors how a real ECU applies a parameter update without a full
+  firmware flash.
 """
 
+import json
 import logging
 import math
 import os
@@ -51,11 +39,20 @@ log = logging.getLogger("ecu-simulator")
 # ── Configuration ─────────────────────────────────────────────────────────────
 CAN_INTERFACE   = os.environ.get("CAN_INTERFACE", "vcan0")
 UPDATE_INTERVAL = float(os.environ.get("UPDATE_INTERVAL_SEC", "1.0"))
+ECU_CONFIG_PATH = os.environ.get("ECU_CONFIG_PATH", "/tmp/sdv-ota/ecu_config.json")
+
+# ── Default ECU parameters (baseline v1.0.0) ──────────────────────────────────
+DEFAULT_CONFIG = {
+    "version":        "1.0.0",
+    "speed_min":      10.0,
+    "speed_max":      120.0,
+    "soc_start":      85.0,
+    "soc_drain_rate": 0.05,
+    "cabin_temp_min": 19.5,
+    "cabin_temp_max": 24.5,
+}
 
 # ── CAN ID → VSS Signal mapping ───────────────────────────────────────────────
-# Arbitration IDs identify the signal on the CAN bus.
-# In a real vehicle these IDs are defined in a DBC (database CAN) file
-# maintained by the vehicle's signal architect.
 CAN_IDS: dict[str, int] = {
     "Vehicle.Speed":                                                  0x100,
     "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current":       0x200,
@@ -63,34 +60,64 @@ CAN_IDS: dict[str, int] = {
 }
 
 
+# ── Config loading ────────────────────────────────────────────────────────────
+
+def load_config() -> dict:
+    if os.path.exists(ECU_CONFIG_PATH):
+        try:
+            with open(ECU_CONFIG_PATH) as f:
+                cfg = json.load(f)
+            log.info(
+                f"[OTA] Config loaded: version={cfg.get('version','?')} | "
+                f"speed={cfg.get('speed_min')}–{cfg.get('speed_max')} km/h | "
+                f"drain={cfg.get('soc_drain_rate')}%/cycle"
+            )
+            return {**DEFAULT_CONFIG, **cfg}
+        except Exception as exc:
+            log.warning(f"[OTA] Config read failed: {exc} — using defaults")
+    return dict(DEFAULT_CONFIG)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Vehicle physics simulation (unchanged from M1–M3)
+# Vehicle physics simulation
 # ─────────────────────────────────────────────────────────────────────────────
 
 class VehicleState:
     """Produces smooth, realistic-looking telemetry using periodic functions."""
 
-    def __init__(self) -> None:
-        self._t: float = 0.0
+    def __init__(self, config: dict) -> None:
+        self._t:   float = 0.0
+        self._soc: float = config["soc_start"]
+        self.cfg         = config
 
     def speed(self) -> float:
-        base  = 65.0 + 50.0 * math.sin(self._t * 0.04)
+        cfg   = self.cfg
+        mid   = (cfg["speed_min"] + cfg["speed_max"]) / 2.0
+        amp   = (cfg["speed_max"] - cfg["speed_min"]) / 2.0
+        base  = mid + amp * math.sin(self._t * 0.04)
         noise = random.gauss(0.0, 1.5)
         return round(max(0.0, min(250.0, base + noise)), 1)
 
     def battery_soc(self) -> float:
-        phase = self._t % 600
-        base  = 85.0 - phase * 0.05
         noise = random.gauss(0.0, 0.05)
-        return round(max(0.0, min(100.0, base + noise)), 2)
+        self._soc -= self.cfg["soc_drain_rate"]
+        if self._soc < 55.0:
+            self._soc = self.cfg["soc_start"]   # periodic reset (simulate charge)
+        return round(max(0.0, min(100.0, self._soc + noise)), 2)
 
     def cabin_temperature(self) -> float:
-        base  = 22.0 + 2.5 * math.sin(self._t * 0.015)
-        noise = random.gauss(0.0, 0.15)
-        return round(base + noise, 1)
+        cfg  = self.cfg
+        mid  = (cfg["cabin_temp_min"] + cfg["cabin_temp_max"]) / 2.0
+        amp  = (cfg["cabin_temp_max"] - cfg["cabin_temp_min"]) / 2.0
+        base = mid + amp * math.sin(self._t * 0.015)
+        return round(base + random.gauss(0.0, 0.15), 1)
 
     def advance(self) -> None:
         self._t += 1.0
+
+    def reload_config(self, config: dict) -> None:
+        self.cfg = config
+        log.info(f"[OTA] VehicleState config reloaded: version={config.get('version')}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -98,13 +125,12 @@ class VehicleState:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def send_signal(bus: can.BusABC, path: str, value: float) -> None:
-    """Pack a float32 value into a 4-byte CAN frame and send it."""
     can_id = CAN_IDS[path]
-    data   = struct.pack('<f', value)          # float32 little-endian
+    data   = struct.pack('<f', value)
     msg    = can.Message(
         arbitration_id=can_id,
         data=data,
-        is_extended_id=False,                  # standard 11-bit ID
+        is_extended_id=False,
     )
     bus.send(msg)
     log.info(
@@ -115,14 +141,8 @@ def send_signal(bus: can.BusABC, path: str, value: float) -> None:
 
 
 def run(vehicle: VehicleState) -> None:
-    """
-    Outer reconnect loop.
-
-    Opens a SocketCAN socket on vcan0 and sends CAN frames continuously.
-    If vcan0 is not available (e.g. modprobe vcan not run yet), waits
-    with exponential back-off and retries — same resilience pattern as M1–M3.
-    """
-    retry_delay = 2.0
+    retry_delay  = 2.0
+    config_mtime = os.path.getmtime(ECU_CONFIG_PATH) if os.path.exists(ECU_CONFIG_PATH) else 0.0
 
     while True:
         bus = None
@@ -133,6 +153,14 @@ def run(vehicle: VehicleState) -> None:
             retry_delay = 2.0
 
             while True:
+                # ── OTA config file watch ────────────────────────────────
+                if os.path.exists(ECU_CONFIG_PATH):
+                    mtime = os.path.getmtime(ECU_CONFIG_PATH)
+                    if mtime != config_mtime:
+                        config_mtime = mtime
+                        new_cfg = load_config()
+                        vehicle.reload_config(new_cfg)
+
                 vehicle.advance()
 
                 send_signal(bus, "Vehicle.Speed",
@@ -164,15 +192,17 @@ def run(vehicle: VehicleState) -> None:
 
 def main() -> None:
     log.info("=" * 60)
-    log.info("  mini-SDV Platform — ECU Simulator  (Milestone 4)")
+    log.info("  mini-SDV Platform — ECU Simulator  (M4 / M6 OTA)")
     log.info(f"  CAN interface : {CAN_INTERFACE}")
     log.info(f"  Interval      : {UPDATE_INTERVAL} s")
+    log.info(f"  Config path   : {ECU_CONFIG_PATH}")
     log.info(f"  CAN ID 0x100  → Vehicle.Speed          (km/h)")
     log.info(f"  CAN ID 0x200  → Battery SoC            (%)")
     log.info(f"  CAN ID 0x300  → Cabin Temperature      (°C)")
     log.info("=" * 60)
 
-    vehicle = VehicleState()
+    config  = load_config()
+    vehicle = VehicleState(config)
     run(vehicle)
 
 

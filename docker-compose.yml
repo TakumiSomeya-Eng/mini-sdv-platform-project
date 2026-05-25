@@ -1,4 +1,4 @@
-# mini-sdv-platform — Milestone 5: AI Signal Monitoring Agent
+# mini-sdv-platform — Milestone 6: OTA Update Simulation
 # ──────────────────────────────────────────────────────────────────────────────
 #
 # SDV Architecture Simulation:
@@ -25,6 +25,8 @@
 #   ros2-bridge     — subscribes Kuksa, forwards to ROS2 topics via DDS (M3)
 #   ros2-subscriber — ROS2 test subscriber, verifies DDS delivery (M3)
 #   ai-monitor      — LLM-based signal anomaly agent (M5)
+#   ota-server      — OTA package registry (M6)
+#   ota-manager     — vehicle-side OTA update agent (M6)
 #
 # Services run directly in WSL2 (M4):
 #   ecu-simulator   — sends CAN frames to vcan0 (services/ecu-simulator/main.py)
@@ -225,6 +227,67 @@ services:
   # Verify:      mosquitto_sub -h localhost -p 1883 -t "sdv/vehicle-001/alerts/ai" -v
   #
   # Requires: ANTHROPIC_API_KEY set in environment or .env file
+  # ── M6: OTA Server ─────────────────────────────────────────────────────────
+  #
+  # Cloud-side OTA package registry.
+  # Hosts versioned ECU config packages (tar.gz) and a version manifest.
+  # The POST /release/{version} endpoint simulates a deployment engineer
+  # promoting a new software version to the fleet.
+  #
+  # SDV Concept:
+  #   In production: Eclipse hawkBit, Mender, or an OEM proprietary server.
+  #   The manifest + package-URL + SHA-256 hash pattern is the core of
+  #   UPTANE's image repository.
+  #
+  # Trigger an update:
+  #   curl -X POST http://localhost:8080/release/1.1.0
+  ota-server:
+    build:
+      context: ./services/ota-server
+      dockerfile: Dockerfile
+    volumes:
+      - ./config/ota/packages:/packages:ro
+      - ./config/ota:/manifest
+    network_mode: host
+    restart: on-failure
+
+  # ── M6: OTA Manager ────────────────────────────────────────────────────────
+  #
+  # Vehicle-side OTA update agent.
+  # Polls ota-server every POLL_INTERVAL_SEC seconds, downloads and verifies
+  # packages, writes new ECU config, and reports status via MQTT.
+  #
+  # SDV Concept:
+  #   In production: Mender client, GENIVI SOTA, or OEM OTA agent.
+  #   Implements CHECK→DOWNLOAD→VERIFY→APPLY→REPORT (simplified UPTANE flow).
+  #
+  # Shared volume /tmp/sdv-ota:
+  #   ota-manager writes ecu_config.json here (inside Docker = /shared/).
+  #   ecu-simulator (WSL2 process) watches /tmp/sdv-ota/ecu_config.json.
+  #   Both share the same WSL2 filesystem via bind mount.
+  #
+  # MQTT status topic: sdv/vehicle-001/ota/status
+  ota-manager:
+    build:
+      context: ./services/ota-manager
+      dockerfile: Dockerfile
+    environment:
+      OTA_SERVER_URL: http://localhost:8080
+      MQTT_HOST: localhost
+      MQTT_PORT: "1883"
+      VEHICLE_ID: "vehicle-001"
+      POLL_INTERVAL_SEC: "30"
+      ECU_CONFIG_PATH: /shared/ecu_config.json
+    volumes:
+      - /tmp/sdv-ota:/shared
+    depends_on:
+      - ota-server
+      - mosquitto
+    network_mode: host
+    restart: on-failure
+
+  # ── M5: AI Signal Monitor ───────────────────────────────────────────────────
+  #
   ai-monitor:
     build:
       context: ./services/ai-monitor
