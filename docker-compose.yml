@@ -286,6 +286,74 @@ services:
     network_mode: host
     restart: on-failure
 
+  # ── M7: InfluxDB ────────────────────────────────────────────────────────────
+  #
+  # Time-series database for persisting vehicle signal history.
+  # Auto-initialized on first start via DOCKER_INFLUXDB_INIT_* env vars.
+  #
+  # SDV Concept:
+  #   In production, a TCU or CVC telemetry agent streams VSS signals to a
+  #   managed time-series DB (AWS Timestream, InfluxDB Cloud, TimescaleDB).
+  #   Grafana — or an OEM analytics platform — queries the DB for trend
+  #   analysis, fleet health monitoring, and OTA impact measurement.
+  #
+  # UI: http://localhost:8086  (admin / sdv-password)
+  influxdb:
+    image: influxdb:2.7
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: sdv-password
+      DOCKER_INFLUXDB_INIT_ORG: sdv-org
+      DOCKER_INFLUXDB_INIT_BUCKET: sdv
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: sdv-token-local
+    network_mode: host
+    restart: on-failure
+
+  # ── M7: InfluxDB Writer ──────────────────────────────────────────────────────
+  #
+  # Subscribes to Kuksa Databroker (same gRPC pattern as mqtt-bridge) and
+  # writes each signal update to InfluxDB as a time-series data point.
+  #
+  # Schema: measurement=vehicle_signals  tag=signal  field=value (float64)
+  influxdb-writer:
+    build:
+      context: ./services/influxdb-writer
+      dockerfile: Dockerfile
+    environment:
+      DATABROKER_HOST: localhost
+      DATABROKER_PORT: "55555"
+      INFLUXDB_URL: http://localhost:8086
+      INFLUXDB_TOKEN: sdv-token-local
+      INFLUXDB_ORG: sdv-org
+      INFLUXDB_BUCKET: sdv
+      VEHICLE_ID: "vehicle-001"
+    depends_on:
+      databroker:
+        condition: service_started
+      influxdb:
+        condition: service_started
+    network_mode: host
+    restart: on-failure
+
+  # ── M7: Grafana ──────────────────────────────────────────────────────────────
+  #
+  # Visualises vehicle signal time-series from InfluxDB.
+  # Datasource and dashboard are provisioned from config/grafana/ — no manual
+  # UI setup required (Infrastructure as Code, DR-75).
+  #
+  # UI: http://localhost:3000  (Anonymous Access — no login required)
+  grafana:
+    image: grafana/grafana:10.4.3
+    volumes:
+      - ./config/grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      influxdb:
+        condition: service_started
+    network_mode: host
+    restart: on-failure
+
   # ── M5: AI Signal Monitor ───────────────────────────────────────────────────
   #
   ai-monitor:
