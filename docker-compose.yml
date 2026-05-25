@@ -354,6 +354,25 @@ services:
     network_mode: host
     restart: on-failure
 
+  # ── M9: Webhook Receiver ────────────────────────────────────────────────────
+  #
+  # Receives Grafana alert notifications (POST /webhook) and logs them.
+  # Simulates a Slack / PagerDuty webhook for local development.
+  #
+  # SDV Concept:
+  #   In production, vehicle anomaly alerts are routed to PagerDuty, OpsGenie,
+  #   or a fleet management dashboard via webhook / API integration.
+  #
+  # Monitor: docker compose logs -f webhook-receiver
+  webhook-receiver:
+    build:
+      context: ./services/webhook-receiver
+      dockerfile: Dockerfile
+    environment:
+      PORT: "9000"
+    network_mode: host
+    restart: on-failure
+
   # ── M8: Fleet Simulator ─────────────────────────────────────────────────────
   #
   # Simulates vehicle-002 and vehicle-003 in parallel threads.

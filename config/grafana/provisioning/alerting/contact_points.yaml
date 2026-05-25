@@ -1,0 +1,12 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: Webhook
+    receivers:
+      - uid: webhook-sdv
+        type: webhook
+        settings:
+          url: http://localhost:9000/webhook
+          httpMethod: POST
+        disableResolveMessage: false

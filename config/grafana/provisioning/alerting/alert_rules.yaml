@@ -1,0 +1,112 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: Vehicle Alerts
+    folder: SDV Alerts
+    interval: 10s
+    rules:
+
+      # ── High Speed Alert ──────────────────────────────────────────────────────
+      # Fires when any vehicle's Speed exceeds 130 km/h.
+      # vehicle-001 with OTA v1.1.0 (range 20-150 km/h) will naturally trigger this.
+      - uid: high-speed-alert
+        title: High Speed Alert
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: influxdb-sdv
+            model:
+              query: "from(bucket: \"sdv\")\n  |> range(start: -1m)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vehicle_signals\")\n  |> filter(fn: (r) => r[\"signal\"] == \"Speed\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> last()"
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: "-100"
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 130
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: "-100"
+              expression: A
+              hide: false
+              refId: B
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "Vehicle speed exceeded 130 km/h"
+        labels:
+          severity: warning
+        isPaused: false
+
+      # ── Low Battery Alert ─────────────────────────────────────────────────────
+      # Fires when any vehicle's BatterySoC drops below 20%.
+      # fleet-simulator vehicles drain to ~20% before charging kicks in.
+      - uid: low-battery-alert
+        title: Low Battery Alert
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: influxdb-sdv
+            model:
+              query: "from(bucket: \"sdv\")\n  |> range(start: -1m)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"vehicle_signals\")\n  |> filter(fn: (r) => r[\"signal\"] == \"BatterySoC\")\n  |> filter(fn: (r) => r[\"_field\"] == \"value\")\n  |> last()"
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: "-100"
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 20
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                name: Expression
+                type: __expr__
+                uid: "-100"
+              expression: A
+              hide: false
+              refId: B
+              type: threshold
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "Vehicle battery SoC dropped below 20%"
+        labels:
+          severity: critical
+        isPaused: false
