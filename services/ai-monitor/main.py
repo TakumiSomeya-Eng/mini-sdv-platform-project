@@ -134,6 +134,12 @@ def call_llm(client: anthropic.Anthropic, history: dict) -> dict | None:
             messages=[{"role": "user", "content": user_content}],
         )
         raw = response.content[0].text.strip()
+        # Strip markdown code fences the model sometimes adds despite instructions
+        if raw.startswith("```"):
+            raw = raw.split("```", 2)[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
         return json.loads(raw)
     except json.JSONDecodeError:
         log.warning(f"LLM JSON parse failed: {raw[:120]}")
