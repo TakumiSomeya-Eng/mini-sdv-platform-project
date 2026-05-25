@@ -28,6 +28,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import tarfile
 import time
 import urllib.error
@@ -153,7 +154,8 @@ def apply_package(pkg_path: str) -> bool:
             extracted = os.path.join(extract_dir, members[0].name)
 
         os.makedirs(os.path.dirname(ECU_CONFIG_PATH), exist_ok=True)
-        os.replace(extracted, ECU_CONFIG_PATH)
+        # shutil.copy2 works across filesystem boundaries (bind mount → container /tmp)
+        shutil.copy2(extracted, ECU_CONFIG_PATH)
         log.info(f"Config written → {ECU_CONFIG_PATH}")
         return True
     except Exception as exc:
