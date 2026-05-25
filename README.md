@@ -30,7 +30,7 @@ This project simulates that architecture using Eclipse Kuksa as the VAL and Sock
 
 ---
 
-## Current Architecture (Milestone 4)
+## Current Architecture (Milestone 5)
 
 ```
   WSL2 Ubuntu (custom 6.18 kernel — SocketCAN support)
@@ -59,19 +59,21 @@ This project simulates that architecture using Eclipse Kuksa as the VAL and Sock
   │  │  │  • Vehicle.Powertrain.TractionBattery               │   │  │
   │  │  │    .StateOfCharge.Current                           │   │  │
   │  │  │  • Vehicle.Cabin.HVAC.AmbientAirTemperature         │   │  │
-  │  │  └──────────────┬──────────────┬──────────────┐        │   │  │
-  │  │                 │ gRPC (poll)  │ gRPC (stream)│        │   │  │
-  │  │                 ▼              ▼              ▼         │   │  │
-  │  │  ┌──────────┐  ┌────────────┐  ┌────────────┐         │   │  │
-  │  │  │dashboard │  │mqtt-bridge │  │ ros2-bridge│         │   │  │
-  │  │  │  :8501   │  │            │  │            │         │   │  │
-  │  │  └──────────┘  └─────┬──────┘  └─────┬──────┘         │   │  │
-  │  │                      │ MQTT           │ DDS (loopback) │   │  │
-  │  │                      ▼               ▼                 │   │  │
-  │  │               ┌──────────┐  ┌───────────────┐          │   │  │
-  │  │               │mosquitto │  │ros2-subscriber│          │   │  │
-  │  │               │  :1883   │  │ (verification)│          │   │  │
-  │  │               └──────────┘  └───────────────┘          │   │  │
+  │  │  └──────┬───────────┬──────────────┬──────────┐        │   │  │
+  │  │         │ gRPC      │ gRPC (stream)│          │ gRPC   │   │  │
+  │  │         │ (poll)    ▼              ▼          │ (poll) │   │  │
+  │  │  ┌──────┴───┐  ┌────────────┐  ┌────────────┐ │        │   │  │
+  │  │  │dashboard │  │mqtt-bridge │  │ ros2-bridge│ │        │   │  │
+  │  │  │  :8501   │  │            │  │            │ │        │   │  │
+  │  │  └──────────┘  └─────┬──────┘  └─────┬──────┘ │        │   │  │
+  │  │       ▲              │ MQTT           │ DDS    ▼        │   │  │
+  │  │       │ alert  ┌─────▼────┐  ┌───────┴───────┐         │   │  │
+  │  │       │ sub    │mosquitto │  │ros2-subscriber│         │   │  │
+  │  │       │        │  :1883   │  │ (verification)│         │   │  │
+  │  │       │        └─────┬────┘  └───────────────┘         │   │  │
+  │  │  ┌────┴─────┐        │ MQTT pub (alerts/ai)            │   │  │
+  │  │  │ai-monitor│◀───────┘  + Claude API (HTTPS)           │   │  │
+  │  │  └──────────┘                                          │   │  │
   │  └─────────────────────────────────────────────────────────┘  │  │
   └────────────────────────────────────────────────────────────────┘
               ↓ localhost (WSL2 auto-forwards to Windows)
@@ -86,22 +88,24 @@ ECU Simulator → [CAN frame 0x100] → vcan0 → CAN Gateway → gRPC → Datab
 Dashboard (poll) ◀─────────────────────────────────────────── Vehicle.Speed
 MQTT Bridge (subscribe) → mosquitto :1883 → sdv/vehicle-001/Vehicle/Speed
 ROS2 Bridge (subscribe) → DDS → /vehicle/speed → ros2-subscriber
+AI Monitor (poll 10s) → Claude API → sdv/vehicle-001/alerts/ai → Dashboard AI panel
 ```
 
 ---
 
-## Prerequisites (M4)
+## Prerequisites (M5)
 
 - **Windows 11** with WSL2
 - **WSL2 Ubuntu** (Ubuntu 24.04 or later)
 - **Custom WSL2 kernel 6.18** with SocketCAN support (see [M4 setup guide](docs/milestone-4/TRD.md))
 - **Python venv** in WSL2 home (`~/sdv-venv`) with `python-can` and `kuksa-client`
+- **Anthropic API key** — set `ANTHROPIC_API_KEY` in your environment or a `.env` file
 
-> M1–M3 only required Docker Desktop. M4 adds SocketCAN which requires a custom WSL2 Linux kernel and Docker Engine running directly inside WSL2 Ubuntu.
+> M1–M3 only required Docker Desktop. M4 adds SocketCAN which requires a custom WSL2 Linux kernel and Docker Engine running directly inside WSL2 Ubuntu. M5 adds the Claude API — an internet connection from WSL2 is required.
 
 ---
 
-## Quick Start (M4)
+## Quick Start (M5)
 
 All commands run in a **WSL2 Ubuntu terminal** unless noted.
 
@@ -110,21 +114,25 @@ All commands run in a **WSL2 Ubuntu terminal** unless noted.
 git clone <repo-url>
 cd mini-sdv-platform
 
-# 1. Bootstrap WSL2 session (run once after every wsl --shutdown)
+# 1. Set your Anthropic API key (required for ai-monitor)
+export ANTHROPIC_API_KEY="sk-ant-..."
+# Or: cp .env.example .env && edit .env
+
+# 2. Bootstrap WSL2 session (run once after every wsl --shutdown)
 #    Loads CAN kernel modules, creates vcan0, starts Docker Engine
 bash scripts/setup-wsl2.sh
 
-# 2. Start all Docker services
+# 3. Start all Docker services (including ai-monitor)
 docker compose up -d
 
-# 3. Start the CAN Gateway (WSL2 terminal 1)
+# 4. Start the CAN Gateway (WSL2 terminal 1)
 ~/sdv-venv/bin/python services/can-gateway/main.py
 
-# 4. Start the ECU Simulator (WSL2 terminal 2)
+# 5. Start the ECU Simulator (WSL2 terminal 2)
 ~/sdv-venv/bin/python services/ecu-simulator/main.py
 
-# 5. Open the Dashboard (Windows browser)
-#    http://localhost:8501
+# 6. Open the Dashboard (Windows browser)
+#    http://localhost:8501  — AI Signal Monitor panel at the bottom
 
 # Optional: Monitor raw CAN frames (WSL2 terminal 3)
 candump vcan0
@@ -134,6 +142,40 @@ candump vcan0
 ```bash
 # Kill CAN gateway and ECU simulator (Ctrl+C in their terminals), then:
 docker compose down
+```
+
+---
+
+## Quick Test: M5 (AI Signal Monitor)
+
+```bash
+# Watch the AI monitor observe → reason → act loop
+docker compose logs -f ai-monitor
+```
+
+Expected output (every 10 seconds):
+```
+[OBSERVE] Polling Databroker for current signal values...
+[OBSERVE] Speed=87.3 km/h | SoC=72.4 % | Temp=22.1 °C
+[REASON] Sending signal history to Claude API...
+[REASON] anomaly=False severity=info — All signals nominal.
+[ACT] No anomaly — no MQTT publish.
+```
+
+```bash
+# Subscribe to AI alerts (published only when anomaly detected)
+mosquitto_sub -h localhost -p 1883 -t "sdv/vehicle-001/alerts/ai" -v
+```
+
+Example alert payload:
+```json
+{
+  "timestamp": "2026-05-25T12:34:56Z",
+  "anomaly": true,
+  "severity": "warning",
+  "explanation": "Battery SoC is declining while vehicle speed is zero, suggesting a parasitic drain.",
+  "signals": { "Vehicle.Speed": 0.0, "...SoC...": 68.2, "...Temperature": 22.1 }
+}
 ```
 
 ---
@@ -274,6 +316,22 @@ Subscribes to Databroker via gRPC streaming and forwards each signal update to M
 
 ---
 
+### `ai-monitor` — AI Signal Monitoring Agent (M5)
+
+**Source:** `services/ai-monitor/`
+
+Observe → Reason → Act loop: polls the Databroker every 10 seconds, sends a rolling signal history to the Claude API (`claude-haiku-4-5`), and publishes a JSON alert to Mosquitto when the LLM detects an anomaly.
+
+| Alert topic | `sdv/vehicle-001/alerts/ai` |
+|---|---|
+| Poll interval | 10 seconds |
+| History window | 10 readings per signal |
+| Model | `claude-haiku-4-5-20251001` |
+
+**Real-world equivalent:** The AI monitoring and safety layer in OEM cloud backends or in-vehicle compute platforms (e.g., NVIDIA Drive, Qualcomm Snapdragon Ride), which apply ML inference over streamed VSS signals to detect anomalies without hard-coded threshold rules.
+
+---
+
 ### `ros2-bridge` + `ros2-subscriber` — ROS2 Integration
 
 **Source:** `services/ros2-bridge/`, `services/ros2-subscriber/`
@@ -305,6 +363,7 @@ Bridges Kuksa signals to ROS2 DDS topics (`/vehicle/speed`, `/vehicle/battery/so
 | Mosquitto | AWS IoT Core / Azure IoT Hub / HiveMQ Cloud |
 | ROS2 Bridge + DDS | Autoware or Apollo autonomous driving middleware |
 | Docker host networking in WSL2 | In-vehicle Ethernet (SOME/IP / Ethernet AVB) |
+| AI Monitor + Claude API | OEM cloud AI safety monitor / in-vehicle LLM assistant |
 
 ---
 
@@ -325,6 +384,7 @@ mini-sdv-platform/
 │   ├── setup-wsl2.sh                   ← M4: WSL2 session bootstrap (modules + vcan0 + dockerd)
 │   └── setup-vcan.sh                   ← legacy: vcan0 setup only
 │
+├── .env.example                        ← copy to .env and add ANTHROPIC_API_KEY
 ├── services/
 │   ├── ecu-simulator/                  ← M4: CAN TX via python-can (runs in WSL2)
 │   │   ├── Dockerfile
@@ -333,16 +393,21 @@ mini-sdv-platform/
 │   ├── can-gateway/                    ← M4: NEW — CAN RX → Databroker gRPC (runs in WSL2)
 │   │   ├── main.py
 │   │   └── requirements.txt            ← python-can==4.3.1 + kuksa-client==0.4.3
-│   ├── dashboard/                      ← M1: Streamlit live dashboard
+│   ├── dashboard/                      ← M1: Streamlit live dashboard (M5: + AI alert panel)
 │   ├── mqtt-bridge/                    ← M2: Kuksa → MQTT forwarder
 │   ├── ros2-bridge/                    ← M3: Kuksa → ROS2 DDS forwarder
-│   └── ros2-subscriber/                ← M3: ROS2 verification subscriber
+│   ├── ros2-subscriber/                ← M3: ROS2 verification subscriber
+│   └── ai-monitor/                     ← M5: NEW — LLM anomaly detection agent
+│       ├── Dockerfile
+│       ├── main.py
+│       └── requirements.txt            ← anthropic + kuksa-client + paho-mqtt
 │
 └── docs/
     ├── milestone-1/  PRD.md  FRD.md  TRD.md
     ├── milestone-2/  PRD.md  FRD.md  TRD.md
     ├── milestone-3/  PRD.md  FRD.md  TRD.md
-    └── milestone-4/  PRD.md  FRD.md  TRD.md
+    ├── milestone-4/  PRD.md  FRD.md  TRD.md
+    └── milestone-5/  PRD.md  FRD.md  TRD.md
 ```
 
 ---
@@ -355,7 +420,7 @@ mini-sdv-platform/
 | **M2** ✅ | Cloud connectivity | MQTT Broker, MQTT Bridge | MQTT, V2C telemetry, subscribe vs. poll |
 | **M3** ✅ | ROS2 integration | ROS2 Bridge, ROS2 Subscriber | DDS, brokerless pub/sub, COVESA VSS 4.x |
 | **M4** ✅ | Virtual CAN bus | CAN Gateway, SocketCAN ECUs | ISO 11898, CAN frames, Gateway ECU pattern |
-| **M5** | AI agent | LLM-based orchestrator | Intelligent actuation, anomaly detection |
+| **M5** ✅ | AI agent | AI Monitor, Claude API | LLM Observe→Reason→Act, anomaly detection |
 
 ---
 

@@ -1,4 +1,4 @@
-# mini-sdv-platform — Milestone 4: Virtual CAN Bus (SocketCAN)
+# mini-sdv-platform — Milestone 5: AI Signal Monitoring Agent
 # ──────────────────────────────────────────────────────────────────────────────
 #
 # SDV Architecture Simulation:
@@ -24,6 +24,7 @@
 #   mqtt-bridge     — subscribes Kuksa, forwards to Mosquitto (M2)
 #   ros2-bridge     — subscribes Kuksa, forwards to ROS2 topics via DDS (M3)
 #   ros2-subscriber — ROS2 test subscriber, verifies DDS delivery (M3)
+#   ai-monitor      — LLM-based signal anomaly agent (M5)
 #
 # Services run directly in WSL2 (M4):
 #   ecu-simulator   — sends CAN frames to vcan0 (services/ecu-simulator/main.py)
@@ -203,6 +204,44 @@ services:
       <<: *cyclonedds-config
     depends_on:
       ros2-bridge:
+        condition: service_started
+    network_mode: host
+    restart: on-failure
+
+  # ── M5: AI Signal Monitor ───────────────────────────────────────────────────
+  #
+  # Observe → Reason → Act loop using the Claude API.
+  # Polls the Databroker every MONITOR_INTERVAL_SEC seconds, sends signal
+  # history to claude-haiku-4-5, and publishes JSON alerts to Mosquitto
+  # when the LLM detects an anomaly.
+  #
+  # SDV Concept:
+  #   The AI monitoring layer sits above the signal pipeline and interprets
+  #   multi-signal context rather than applying fixed threshold rules. This
+  #   mirrors how OEM cloud safety monitors and in-vehicle AI assistants
+  #   consume VSS signals in modern SDV architectures.
+  #
+  # Alert topic: sdv/vehicle-001/alerts/ai
+  # Verify:      mosquitto_sub -h localhost -p 1883 -t "sdv/vehicle-001/alerts/ai" -v
+  #
+  # Requires: ANTHROPIC_API_KEY set in environment or .env file
+  ai-monitor:
+    build:
+      context: ./services/ai-monitor
+      dockerfile: Dockerfile
+    environment:
+      DATABROKER_HOST: localhost
+      DATABROKER_PORT: "55555"
+      MQTT_HOST: localhost
+      MQTT_PORT: "1883"
+      VEHICLE_ID: "vehicle-001"
+      MONITOR_INTERVAL_SEC: "10"
+      HISTORY_WINDOW: "10"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    depends_on:
+      databroker:
+        condition: service_started
+      mosquitto:
         condition: service_started
     network_mode: host
     restart: on-failure

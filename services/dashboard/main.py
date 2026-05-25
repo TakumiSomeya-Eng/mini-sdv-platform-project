@@ -29,11 +29,13 @@ Design decisions:
     dashboard that auto-refreshes without user interaction.
 """
 
+import json
 import logging
 import os
 import time
 from collections import deque
 
+import paho.mqtt.client as mqtt_client
 import streamlit as st
 from kuksa_client.grpc import VSSClient
 
@@ -88,6 +90,9 @@ SIGNALS: dict[str, dict] = {
 
 SIGNAL_PATHS = list(SIGNALS.keys())
 
+# M5: AI monitor alert subscription
+AI_ALERT_TOPIC = f"sdv/{VEHICLE_ID}/alerts/ai"
+
 
 # ── Session State ─────────────────────────────────────────────────────────────
 
@@ -108,6 +113,10 @@ def init_session_state() -> None:
         st.session_state.prev_values = {path: None for path in SIGNAL_PATHS}
     if "connected" not in st.session_state:
         st.session_state.connected = False
+    if "ai_alert" not in st.session_state:
+        st.session_state.ai_alert = None
+    if "mqtt_subscribed" not in st.session_state:
+        st.session_state.mqtt_subscribed = False
 
 
 # ── Databroker Poll ───────────────────────────────────────────────────────────
@@ -241,6 +250,78 @@ def render_charts() -> None:
         st.divider()
 
 
+def init_mqtt_alert_listener() -> None:
+    """
+    Subscribe to the AI monitor alert topic in a background MQTT thread.
+
+    paho loop_start() runs the network loop in a daemon thread. The on_message
+    callback writes directly to st.session_state — safe because Streamlit
+    reruns the entire script on each cycle, so the next rerun picks up the
+    latest alert without needing locks.
+    """
+    if st.session_state.mqtt_subscribed:
+        return
+    try:
+        client = mqtt_client.Client(client_id="dashboard-alert-sub")
+        def on_message(_client, _userdata, msg):
+            try:
+                st.session_state.ai_alert = json.loads(msg.payload.decode())
+            except Exception:
+                pass
+        client.on_message = on_message
+        client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
+        client.subscribe(AI_ALERT_TOPIC)
+        client.loop_start()
+        st.session_state.mqtt_subscribed = True
+        log.info(f"Subscribed to AI alert topic: {AI_ALERT_TOPIC}")
+    except Exception as exc:
+        log.warning(f"AI alert MQTT subscription failed: {exc}")
+
+
+def render_ai_alert() -> None:
+    """
+    AI Signal Monitor alert panel (M5).
+
+    Displays the latest anomaly assessment from the ai-monitor agent.
+    Severity maps to Streamlit alert colour: info→blue, warning→yellow, critical→red.
+    """
+    st.subheader("AI Signal Monitor")
+    st.caption("Powered by claude-haiku-4-5 · Updates every 10 s · Topic: " + AI_ALERT_TOPIC)
+
+    alert = st.session_state.ai_alert
+
+    if alert is None:
+        st.info("No anomaly detected — waiting for AI monitor data…")
+        return
+
+    severity = alert.get("severity", "info")
+    explanation = alert.get("explanation", "—")
+    timestamp = alert.get("timestamp", "—")
+
+    if severity == "critical":
+        st.error(f"**CRITICAL** — {explanation}")
+    elif severity == "warning":
+        st.warning(f"**WARNING** — {explanation}")
+    else:
+        st.info(f"**INFO** — {explanation}")
+
+    signals = alert.get("signals", {})
+    if signals:
+        cols = st.columns(3)
+        labels = [
+            ("Speed", "Vehicle.Speed", "km/h"),
+            ("SoC", "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current", "%"),
+            ("Temp", "Vehicle.Cabin.HVAC.AmbientAirTemperature", "°C"),
+        ]
+        for col, (name, path, unit) in zip(cols, labels):
+            val = signals.get(path)
+            with col:
+                st.metric(label=f"{name} ({unit})", value=f"{val:.1f}" if val is not None else "—")
+
+    st.caption(f"Assessment timestamp: {timestamp}")
+    st.divider()
+
+
 def render_sidebar() -> None:
     """
     Educational sidebar explaining the SDV architecture visible in this demo.
@@ -304,6 +385,7 @@ def main() -> None:
     )
 
     init_session_state()
+    init_mqtt_alert_listener()
 
     render_header()
     st.divider()
@@ -321,6 +403,7 @@ def main() -> None:
     render_metrics(values)
     st.divider()
     render_charts()
+    render_ai_alert()
     render_sidebar()
 
     # Update previous values for delta calculation in the next cycle
