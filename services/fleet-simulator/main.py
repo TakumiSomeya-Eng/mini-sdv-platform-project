@@ -117,7 +117,7 @@ def connect_mqtt() -> mqtt_client.Client:
     retry = 2.0
     while True:
         try:
-            client = mqtt_client.Client(client_id=f"fleet-simulator")
+            client = mqtt_client.Client(client_id="sdv-fleet")
             apply_tls(client)
             client.connect(MQTT_HOST, MQTT_PORT)
             client.loop_start()

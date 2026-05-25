@@ -148,7 +148,7 @@ def connect_mqtt() -> mqtt.Client:
     In a bidirectional system (M5: AI commands), this would also subscribe
     to a command topic and write actuator values back to the Databroker.
     """
-    client = mqtt.Client(client_id=f"sdv-bridge-{VEHICLE_ID}")
+    client = mqtt.Client(client_id="sdv-bridge")
 
     # Callbacks for observability
     client.on_connect = lambda c, u, f, rc: log.info(

@@ -281,7 +281,7 @@ def init_mqtt_alert_listener() -> None:
     if st.session_state.mqtt_subscribed:
         return
     try:
-        client = mqtt_client.Client(client_id="dashboard-alert-sub")
+        client = mqtt_client.Client(client_id="sdv-dashboard")
         def on_message(_client, _userdata, msg):
             try:
                 data = json.loads(msg.payload.decode())

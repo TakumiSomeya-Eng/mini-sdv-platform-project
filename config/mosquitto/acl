@@ -1,0 +1,30 @@
+# Mosquitto ACL — M11: Role-Based Access Control
+# ──────────────────────────────────────────────────────────────────────────────
+# Format: user <CN>  /  topic <read|write|readwrite> <pattern>
+# CN comes from the client certificate (use_identity_as_username true in M10).
+#
+# Principle of Least Privilege:
+#   Each service may only publish to its own vehicle topics, or subscribe.
+#   No service has both read and write on the same topic.
+#   A compromised service cannot inject data into another vehicle's stream.
+
+# ── mqtt-bridge: publishes vehicle-001 signals from Kuksa Databroker ──────────
+user sdv-bridge
+topic write sdv/vehicle-001/#
+
+# ── fleet-simulator: publishes vehicle-002 and vehicle-003 telemetry ──────────
+user sdv-fleet
+topic write sdv/vehicle-002/#
+topic write sdv/vehicle-003/#
+
+# ── ai-monitor: publishes anomaly alerts for vehicle-001 ─────────────────────
+user sdv-ai
+topic write sdv/vehicle-001/alerts/#
+
+# ── ota-manager (vehicle-001/002/003 share one cert): publishes OTA status ────
+user sdv-ota
+topic write sdv/+/ota/#
+
+# ── dashboard: subscribes to all vehicle topics (read-only) ───────────────────
+user sdv-dashboard
+topic read sdv/#

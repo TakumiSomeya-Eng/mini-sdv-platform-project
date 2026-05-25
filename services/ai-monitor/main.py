@@ -119,7 +119,7 @@ def apply_tls(client: mqtt_client.Client) -> None:
 
 
 def connect_mqtt() -> mqtt_client.Client:
-    client = mqtt_client.Client(client_id="ai-monitor")
+    client = mqtt_client.Client(client_id="sdv-ai")
     apply_tls(client)
     retry_delay = 2.0
     while True:

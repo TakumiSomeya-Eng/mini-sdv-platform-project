@@ -1,5 +1,5 @@
 #!/bin/bash
-# generate-certs.sh — M10: TLS/mTLS certificate generation
+# generate-certs.sh — M11: TLS/mTLS + service-specific client certificates
 # Run once from project root in WSL2: bash scripts/generate-certs.sh
 set -euo pipefail
 
@@ -28,20 +28,28 @@ openssl x509 -req -days 365 \
   -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1") \
   -out "$CERTS_DIR/server.crt"
 
-echo "=== [3/3] Generating shared client certificate ==="
-openssl genrsa -out "$CERTS_DIR/client.key" 2048
-openssl req -new \
-  -key "$CERTS_DIR/client.key" \
-  -out "$CERTS_DIR/client.csr" \
-  -subj "/CN=sdv-client/O=mini-sdv-platform/C=JP"
-openssl x509 -req -days 365 \
-  -in "$CERTS_DIR/client.csr" \
-  -CA "$CERTS_DIR/ca.crt" \
-  -CAkey "$CERTS_DIR/ca.key" \
-  -CAcreateserial \
-  -out "$CERTS_DIR/client.crt"
+echo "=== [3/3] Generating service-specific client certificates (M11 ACL) ==="
+# Each service gets its own certificate with a unique CN.
+# CN becomes the MQTT username (use_identity_as_username true).
+# The ACL file maps each CN to its permitted publish/subscribe topics.
+for SERVICE in bridge fleet ai ota dashboard; do
+  CN="sdv-${SERVICE}"
+  echo "  Generating ${SERVICE}.crt (CN=${CN})..."
+  openssl genrsa -out "$CERTS_DIR/${SERVICE}.key" 2048
+  openssl req -new \
+    -key "$CERTS_DIR/${SERVICE}.key" \
+    -out "$CERTS_DIR/${SERVICE}.csr" \
+    -subj "/CN=${CN}/O=mini-sdv-platform/C=JP"
+  openssl x509 -req -days 365 \
+    -in "$CERTS_DIR/${SERVICE}.csr" \
+    -CA "$CERTS_DIR/ca.crt" \
+    -CAkey "$CERTS_DIR/ca.key" \
+    -CAcreateserial \
+    -out "$CERTS_DIR/${SERVICE}.crt"
+  rm "$CERTS_DIR/${SERVICE}.csr"
+done
 
-# Clean up CSR and serial files — not needed after signing
+# Clean up serial and CSR files
 rm -f "$CERTS_DIR"/*.csr "$CERTS_DIR"/*.srl
 
 # Restrict private key permissions

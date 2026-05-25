@@ -90,7 +90,7 @@ def apply_tls(client: mqtt_client.Client) -> None:
 
 
 def connect_mqtt() -> mqtt_client.Client:
-    client = mqtt_client.Client(client_id="ota-manager")
+    client = mqtt_client.Client(client_id="sdv-ota")
     apply_tls(client)
     retry = 2.0
     while True:
