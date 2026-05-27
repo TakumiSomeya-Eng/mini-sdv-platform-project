@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: sdv
+  labels:
+    app: grafana
+    milestone: m7
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: grafana
+          image: grafana/grafana:10.4.3
+          volumeMounts:
+            - name: grafana-ini
+              mountPath: /etc/grafana/grafana.ini
+            - name: grafana-provisioning
+              mountPath: /etc/grafana/provisioning
+              readOnly: true
+      volumes:
+        - name: grafana-ini
+          hostPath:
+            path: /var/lib/sdv/config/grafana/grafana.ini
+            type: File
+        - name: grafana-provisioning
+          hostPath:
+            path: /var/lib/sdv/config/grafana/provisioning
+            type: Directory

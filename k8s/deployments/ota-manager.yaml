@@ -1,0 +1,60 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ota-manager-config
+  namespace: sdv
+data:
+  OTA_SERVER_URL: "http://localhost:8080"
+  MQTT_HOST: "localhost"
+  MQTT_PORT: "8883"
+  MQTT_TLS: "true"
+  MQTT_CA_CERT: "/certs/ca.crt"
+  MQTT_CLIENT_CERT: "/certs/ota.crt"
+  MQTT_CLIENT_KEY: "/certs/ota.key"
+  VEHICLE_ID: "vehicle-001"
+  POLL_INTERVAL_SEC: "30"
+  ECU_CONFIG_PATH: "/shared/ecu_config.json"
+  OTEL_ENABLED: "true"
+  OTEL_ENDPOINT: "http://localhost:4318/v1/traces"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ota-manager
+  namespace: sdv
+  labels:
+    app: ota-manager
+    milestone: m6
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ota-manager
+  template:
+    metadata:
+      labels:
+        app: ota-manager
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: ota-manager
+          image: localhost:5000/sdv/ota-manager:latest
+          envFrom:
+            - configMapRef:
+                name: ota-manager-config
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /certs
+              readOnly: true
+            - name: shared
+              mountPath: /shared
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: tls-certs
+        - name: shared
+          hostPath:
+            path: /tmp/sdv-ota
+            type: DirectoryOrCreate

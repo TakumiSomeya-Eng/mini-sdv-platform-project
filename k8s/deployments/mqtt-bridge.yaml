@@ -1,0 +1,53 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mqtt-bridge-config
+  namespace: sdv
+data:
+  DATABROKER_HOST: "localhost"
+  DATABROKER_PORT: "55555"
+  MQTT_HOST: "localhost"
+  MQTT_PORT: "8883"
+  MQTT_TLS: "true"
+  MQTT_CA_CERT: "/certs/ca.crt"
+  MQTT_CLIENT_CERT: "/certs/bridge.crt"
+  MQTT_CLIENT_KEY: "/certs/bridge.key"
+  VEHICLE_ID: "vehicle-001"
+  OTEL_ENABLED: "true"
+  OTEL_ENDPOINT: "http://localhost:4318/v1/traces"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mqtt-bridge
+  namespace: sdv
+  labels:
+    app: mqtt-bridge
+    milestone: m2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mqtt-bridge
+  template:
+    metadata:
+      labels:
+        app: mqtt-bridge
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: mqtt-bridge
+          image: localhost:5000/sdv/mqtt-bridge:latest
+          envFrom:
+            - configMapRef:
+                name: mqtt-bridge-config
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /certs
+              readOnly: true
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: tls-certs

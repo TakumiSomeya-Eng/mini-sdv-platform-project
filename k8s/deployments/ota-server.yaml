@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ota-server
+  namespace: sdv
+  labels:
+    app: ota-server
+    milestone: m6
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ota-server
+  template:
+    metadata:
+      labels:
+        app: ota-server
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: ota-server
+          image: localhost:5000/sdv/ota-server:latest
+          volumeMounts:
+            - name: ota-packages
+              mountPath: /packages
+              readOnly: true
+            - name: ota-manifest
+              mountPath: /manifest
+      volumes:
+        - name: ota-packages
+          hostPath:
+            path: /var/lib/sdv/config/ota/packages
+            type: Directory
+        - name: ota-manifest
+          hostPath:
+            path: /var/lib/sdv/config/ota
+            type: Directory

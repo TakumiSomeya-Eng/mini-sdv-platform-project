@@ -1,0 +1,35 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webhook-receiver-config
+  namespace: sdv
+data:
+  PORT: "9000"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook-receiver
+  namespace: sdv
+  labels:
+    app: webhook-receiver
+    milestone: m9
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webhook-receiver
+  template:
+    metadata:
+      labels:
+        app: webhook-receiver
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: webhook-receiver
+          image: localhost:5000/sdv/webhook-receiver:latest
+          envFrom:
+            - configMapRef:
+                name: webhook-receiver-config

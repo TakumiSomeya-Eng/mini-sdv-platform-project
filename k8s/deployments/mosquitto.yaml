@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mosquitto
+  namespace: sdv
+  labels:
+    app: mosquitto
+    milestone: m2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mosquitto
+  template:
+    metadata:
+      labels:
+        app: mosquitto
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: mosquitto
+          image: eclipse-mosquitto:2.0
+          volumeMounts:
+            - name: mosquitto-config
+              mountPath: /mosquitto/config
+              readOnly: true
+            - name: tls-certs
+              mountPath: /mosquitto/certs
+              readOnly: true
+      volumes:
+        - name: mosquitto-config
+          hostPath:
+            path: /var/lib/sdv/config/mosquitto
+            type: Directory
+        - name: tls-certs
+          secret:
+            secretName: tls-certs

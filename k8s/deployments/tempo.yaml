@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+  namespace: sdv
+  labels:
+    app: tempo
+    milestone: m13
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tempo
+  template:
+    metadata:
+      labels:
+        app: tempo
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: tempo
+          image: grafana/tempo:latest
+          args: ["-config.file=/etc/tempo.yaml"]
+          volumeMounts:
+            - name: tempo-config
+              mountPath: /etc/tempo.yaml
+      volumes:
+        - name: tempo-config
+          hostPath:
+            path: /var/lib/sdv/config/tempo/tempo.yaml
+            type: File

@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: influxdb
+  namespace: sdv
+  labels:
+    app: influxdb
+    milestone: m7
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: influxdb
+  template:
+    metadata:
+      labels:
+        app: influxdb
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: influxdb
+          image: influxdb:2.7
+          env:
+            - name: DOCKER_INFLUXDB_INIT_MODE
+              value: setup
+            - name: DOCKER_INFLUXDB_INIT_USERNAME
+              value: admin
+            - name: DOCKER_INFLUXDB_INIT_PASSWORD
+              value: sdv-password
+            - name: DOCKER_INFLUXDB_INIT_ORG
+              value: sdv-org
+            - name: DOCKER_INFLUXDB_INIT_BUCKET
+              value: sdv
+            - name: DOCKER_INFLUXDB_INIT_ADMIN_TOKEN
+              value: sdv-token-local
+          volumeMounts:
+            - name: influxdb-data
+              mountPath: /var/lib/influxdb2
+      volumes:
+        - name: influxdb-data
+          hostPath:
+            path: /var/lib/sdv/influxdb-data
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: influxdb-writer-config
+  namespace: sdv
+data:
+  DATABROKER_HOST: "localhost"
+  DATABROKER_PORT: "55555"
+  INFLUXDB_URL: "http://localhost:8086"
+  INFLUXDB_TOKEN: "sdv-token-local"
+  INFLUXDB_ORG: "sdv-org"
+  INFLUXDB_BUCKET: "sdv"
+  VEHICLE_ID: "vehicle-001"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: influxdb-writer
+  namespace: sdv
+  labels:
+    app: influxdb-writer
+    milestone: m7
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: influxdb-writer
+  template:
+    metadata:
+      labels:
+        app: influxdb-writer
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: influxdb-writer
+          image: localhost:5000/sdv/influxdb-writer:latest
+          envFrom:
+            - configMapRef:
+                name: influxdb-writer-config
