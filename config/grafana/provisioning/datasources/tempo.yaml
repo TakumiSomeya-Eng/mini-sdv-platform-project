@@ -1,0 +1,14 @@
+apiVersion: 1
+
+datasources:
+  - name: Tempo
+    type: tempo
+    uid: tempo-sdv
+    url: http://localhost:3200
+    access: proxy
+    jsonData:
+      tracesToMetrics:
+        datasourceUid: influxdb-sdv
+        tags:
+          - key: vehicle.id
+            value: vehicle_id

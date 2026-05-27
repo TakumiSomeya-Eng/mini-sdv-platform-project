@@ -359,22 +359,26 @@ services:
     network_mode: host
     restart: on-failure
 
-  # ── M12: Jaeger — Distributed Tracing Backend ───────────────────────────────
+  # ── M13: Grafana Tempo — Distributed Tracing Backend ──────────────────────────
   #
-  # Receives traces from mqtt-bridge, ai-monitor, and ota-manager via OTLP/gRPC.
-  # all-in-one image bundles collector + query + UI in a single container.
+  # Receives traces from mqtt-bridge, ai-monitor, and ota-manager via OTLP/HTTP.
+  # Replaces Jaeger (M12): Tempo is OTLP-compatible and integrates natively with
+  # Grafana Explore for unified logs + metrics + traces (single pane of glass).
   #
   # SDV Concept:
   #   In production, distributed tracing reveals latency across microservices —
   #   e.g., how long a CAN frame takes from ECU → Databroker → MQTT → cloud.
-  #   Jaeger / Tempo / Zipkin are common backends; OTLP is the standard protocol.
+  #   Tempo is preferred over Jaeger when Grafana is already in the stack because
+  #   TraceQL queries and trace-to-metrics links are built-in.
   #
-  # UI:        http://localhost:16686
-  # OTLP gRPC: localhost:4317
-  jaeger:
-    image: jaegertracing/all-in-one:1.57
-    environment:
-      COLLECTOR_OTLP_ENABLED: "true"
+  # API:       http://localhost:3200
+  # OTLP HTTP: localhost:4318 (same port as Jaeger — no service changes needed)
+  # UI:        Grafana Explore → Tempo datasource
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./config/tempo/tempo.yaml:/etc/tempo.yaml:ro
     network_mode: host
     restart: on-failure
 
