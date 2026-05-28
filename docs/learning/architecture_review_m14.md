@@ -61,8 +61,13 @@ Setting `--flannel-backend=none` disables flannel entirely. Without any CNI plug
 | ClusterIP Services route to pods | ClusterIP is unreachable |
 | inter-pod communication via DNS | N/A — all pods on host network |
 | local-path provisioner works | local-path provisioner fails (needs ClusterIP API) |
+| CoreDNS reachable (ClusterIP) | CoreDNS unreachable → external DNS fails |
 
-**Impact in M14**: All pods use `hostNetwork: true`, so Services are never needed for inter-pod communication. However, disabling kube-proxy also breaks the local-path PVC provisioner, which tries to reach the Kubernetes API server via its ClusterIP (`10.43.0.1:443`). Fix: use `hostPath` volumes instead of PVCs.
+**Impact in M14**: All pods use `hostNetwork: true`, so Services are never needed for inter-pod communication. However, disabling kube-proxy has two side effects:
+
+1. **PVC provisioner fails**: local-path provisioner tries to reach the K8s API server at its ClusterIP (`10.43.0.1:443`). Fix: use `hostPath` volumes instead of PVCs.
+
+2. **External DNS fails**: CoreDNS runs as a K8s Service with ClusterIP `10.43.0.10`. With `dnsPolicy: ClusterFirstWithHostNet`, pods use `10.43.0.10` as nameserver — but ClusterIP is unreachable without kube-proxy. Result: `Temporary failure in name resolution` for any external hostname (api.anthropic.com, grafana.com, etc.). Fix: use `dnsPolicy: Default` so pods inherit the host's `/etc/resolv.conf` (WSL2's working DNS) instead.
 
 ---
 
@@ -118,17 +123,25 @@ command: ["--vss", "/vss/vss_mini_covesa.json", "--insecure"]
 args: ["--vss", "/vss/vss_mini_covesa.json", "--insecure"]
 ```
 
-### 4.3 hostNetwork: true
+### 4.3 hostNetwork: true and dnsPolicy
 
 ```yaml
 spec:
-  hostNetwork: true                    # Pod shares WSL2 network namespace
-  dnsPolicy: ClusterFirstWithHostNet   # Required companion setting
+  hostNetwork: true      # Pod shares WSL2 network namespace
+  dnsPolicy: Default     # Use host /etc/resolv.conf directly
 ```
 
 With `hostNetwork: true`, the pod's network is identical to the host's. Services bind to `localhost:<port>` and are accessible from Windows via WSL2 port forwarding — exactly the same as Docker Compose `network_mode: host`.
 
-`dnsPolicy: ClusterFirstWithHostNet` is mandatory when `hostNetwork: true`. Without it, DNS falls back to the host's `/etc/resolv.conf`, breaking K8s cluster DNS.
+**dnsPolicy options with hostNetwork:**
+
+| dnsPolicy | Nameserver used | Works in M14? |
+|-----------|----------------|---------------|
+| `ClusterFirstWithHostNet` | CoreDNS ClusterIP (`10.43.0.10`) | ❌ ClusterIP unreachable (kube-proxy disabled) |
+| `Default` | Host `/etc/resolv.conf` (WSL2 DNS) | ✅ External DNS works |
+| `None` | Explicit `dnsConfig.nameservers` | ✅ (manual config needed) |
+
+**Standard advice** says `ClusterFirstWithHostNet` is required with `hostNetwork: true` to preserve cluster DNS. But that advice assumes kube-proxy is running. In this environment (kube-proxy disabled, all pods on hostNetwork, no Service-based inter-pod communication), `Default` is the correct choice.
 
 ### 4.4 ConfigMap vs Secret
 
@@ -256,10 +269,94 @@ docker compose up -d --force-recreate ai-monitor  # Full restart, brief downtime
 | `CreateContainerConfigError` (grafana/tempo) | `subPath` cannot be used with hostPath File type | Remove `subPath:` from volumeMount |
 | Port conflict (ota-server/webhook-receiver) | Docker Compose and K8s both use `hostNetwork`, same ports | Run `docker compose down` before deploying to K8s |
 | PVC `Pending` forever | `--disable-kube-proxy` makes ClusterIP unreachable; local-path provisioner can't reach API server | Replace PVC with `hostPath: DirectoryOrCreate` |
+| `APIConnectionError: Connection error` (ai-monitor → Anthropic API) | `dnsPolicy: ClusterFirstWithHostNet` points to CoreDNS ClusterIP `10.43.0.10`; unreachable without kube-proxy → all external DNS fails | Change all deployments to `dnsPolicy: Default` |
+| Dashboard `localhost:8501` not accessible | Streamlit dashboard deployment missing from M14 k3s migration | Create `k8s/deployments/dashboard.yaml`; add `dashboard` to `build-push.sh` |
+| MQTT reconnects every second; AI alerts never appear in dashboard | Streamlit runs scripts via `exec()` per rerun — module-level globals reset each time; paho MQTT client created anew every second, old connection dropped | Replace module global with `st.cache_resource`; store messages in cached dict, copy to `session_state` in main thread |
+| `docker build` fails: `error getting credentials` | `~/.docker/config.json` has `"credsStore": "desktop.exe"` from Docker Desktop; not available with Docker Engine | Set `~/.docker/config.json` to `{}` |
 
 ---
 
-## 8. Production Comparison
+## 8. Streamlit + Background Threads — st.cache_resource Pattern
+
+### 8.1 How Streamlit Runs Scripts
+
+```
+Browser connects
+    ↓
+Streamlit creates session
+    ↓
+exec(script_source, namespace)   ← fresh namespace each rerun
+    ↓
+time.sleep(1); st.rerun()
+    ↓
+exec(script_source, namespace)   ← NEW fresh namespace again
+```
+
+Streamlit re-executes the script file on every rerun using `exec()`. This means **module-level variables are re-initialized on every rerun** — they do not persist the way they would in a normally imported Python module.
+
+### 8.2 The Wrong Pattern (reconnects every second)
+
+```python
+# ❌ Module-level global — reset by exec() each rerun
+_mqtt_client = None
+
+def init_mqtt():
+    global _mqtt_client
+    if _mqtt_client is not None:  # always None after exec()
+        return
+    _mqtt_client = paho.Client()
+    _mqtt_client.connect(...)    # new connection every second!
+```
+
+### 8.3 The Correct Pattern (st.cache_resource)
+
+```python
+# ✅ st.cache_resource — persists across all reruns and sessions
+@st.cache_resource
+def _get_mqtt_state() -> dict:
+    return {"alert": None, "ota": None, "lock": threading.Lock()}
+
+@st.cache_resource
+def _get_mqtt_client():
+    state = _get_mqtt_state()
+    client = paho.Client(client_id="sdv-dashboard")
+
+    def on_message(_c, _u, msg):
+        data = json.loads(msg.payload.decode())
+        with state["lock"]:              # thread-safe write
+            state["alert"] = data        # store in cached dict
+
+    client.on_message = on_message
+    client.connect(MQTT_HOST, MQTT_PORT)
+    client.loop_start()
+    return client                        # cached — called only once
+
+def sync_mqtt_to_session():
+    _get_mqtt_client()                   # no-op after first call
+    state = _get_mqtt_state()
+    with state["lock"]:                  # thread-safe read in main thread
+        if state["alert"]:
+            st.session_state.ai_alert = state["alert"]
+```
+
+**Key rules:**
+- `st.cache_resource` → for connections, models, shared resources (persists per process)
+- `st.cache_data` → for pure functions returning serialisable data (per arguments)
+- Never write to `st.session_state` from a background thread — copy in the main thread
+
+### 8.4 Production Equivalent
+
+In a production SDV cloud backend, this pattern maps to:
+
+| Streamlit Pattern | Production |
+|---|---|
+| `st.cache_resource` for MQTT client | Singleton connection pool (e.g., AWS IoT Core SDK) |
+| Background thread + shared dict | Message queue (Kafka consumer → Redis) |
+| Copy to session_state per rerun | WebSocket push to browser (Server-Sent Events) |
+
+---
+
+## 10. Production Comparison
 
 | Aspect | M14 (Development) | Production |
 |--------|------------------|------------|
@@ -291,7 +388,7 @@ Cloud K8s Cluster (EKS)
 
 ---
 
-## 9. Next Milestone Candidates
+## 11. Next Milestone Candidates
 
 | Candidate | Description | Technology |
 |-----------|-------------|------------|
