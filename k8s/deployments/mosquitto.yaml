@@ -17,7 +17,7 @@ spec:
         app: mosquitto
     spec:
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      dnsPolicy: Default
       containers:
         - name: mosquitto
           image: eclipse-mosquitto:2.0

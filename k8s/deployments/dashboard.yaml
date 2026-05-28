@@ -1,56 +1,46 @@
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: ai-monitor-config
+  name: dashboard-config
   namespace: sdv
 data:
   DATABROKER_HOST: "localhost"
   DATABROKER_PORT: "55555"
   MQTT_HOST: "localhost"
   MQTT_PORT: "8883"
+  VEHICLE_ID: "vehicle-001"
   MQTT_TLS: "true"
   MQTT_CA_CERT: "/certs/ca.crt"
-  MQTT_CLIENT_CERT: "/certs/ai.crt"
-  MQTT_CLIENT_KEY: "/certs/ai.key"
-  VEHICLE_ID: "vehicle-001"
-  MONITOR_INTERVAL_SEC: "10"
-  HISTORY_WINDOW: "10"
-  OTEL_ENABLED: "true"
-  OTEL_ENDPOINT: "http://localhost:4318/v1/traces"
+  MQTT_CLIENT_CERT: "/certs/dashboard.crt"
+  MQTT_CLIENT_KEY: "/certs/dashboard.key"
+  HOME: "/tmp"
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ai-monitor
+  name: dashboard
   namespace: sdv
   labels:
-    app: ai-monitor
-    milestone: m5
+    app: dashboard
+    milestone: m1
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ai-monitor
+      app: dashboard
   template:
     metadata:
       labels:
-        app: ai-monitor
+        app: dashboard
     spec:
       hostNetwork: true
       dnsPolicy: Default
       containers:
-        - name: ai-monitor
-          image: localhost:5000/sdv/ai-monitor:latest
+        - name: dashboard
+          image: localhost:5000/sdv/dashboard:latest
           envFrom:
             - configMapRef:
-                name: ai-monitor-config
-          env:
-            - name: ANTHROPIC_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: ai-secrets
-                  key: ANTHROPIC_API_KEY
+                name: dashboard-config
           volumeMounts:
             - name: tls-certs
               mountPath: /certs

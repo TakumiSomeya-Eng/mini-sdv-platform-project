@@ -37,7 +37,7 @@ spec:
         app: ota-manager
     spec:
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      dnsPolicy: Default
       containers:
         - name: ota-manager
           image: localhost:5000/sdv/ota-manager:latest

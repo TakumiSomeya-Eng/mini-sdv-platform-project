@@ -17,7 +17,7 @@ spec:
         app: databroker
     spec:
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      dnsPolicy: Default
       containers:
         - name: databroker
           image: ghcr.io/eclipse-kuksa/kuksa-databroker:0.4.4

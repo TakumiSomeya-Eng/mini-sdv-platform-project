@@ -36,7 +36,7 @@ spec:
         app: mqtt-bridge
     spec:
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      dnsPolicy: Default
       containers:
         - name: mqtt-bridge
           image: localhost:5000/sdv/mqtt-bridge:latest

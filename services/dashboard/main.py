@@ -32,6 +32,7 @@ Design decisions:
 import json
 import logging
 import os
+import threading
 import time
 from collections import deque
 
@@ -40,12 +41,16 @@ import streamlit as st
 from kuksa_client.grpc import VSSClient
 
 # ── Logging ───────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    format="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
+# Force our handler so Streamlit's logging reconfiguration doesn't swallow logs.
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter(
+    fmt="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
     datefmt="%Y-%m-%dT%H:%M:%S",
-    level=logging.INFO,
-)
+))
+logging.root.handlers = [_handler]
+logging.root.setLevel(logging.INFO)
 log = logging.getLogger("dashboard")
+
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 DATABROKER_HOST  = os.environ.get("DATABROKER_HOST", "localhost")
@@ -124,8 +129,6 @@ def init_session_state() -> None:
         st.session_state.ai_alert = None
     if "ota_status" not in st.session_state:
         st.session_state.ota_status = None
-    if "mqtt_subscribed" not in st.session_state:
-        st.session_state.mqtt_subscribed = False
 
 
 # ── Databroker Poll ───────────────────────────────────────────────────────────
@@ -269,38 +272,59 @@ def apply_tls(client: mqtt_client.Client) -> None:
     )
 
 
-def init_mqtt_alert_listener() -> None:
-    """
-    Subscribe to the AI monitor alert topic in a background MQTT thread.
+@st.cache_resource
+def _get_mqtt_state() -> dict:
+    """Thread-safe shared state for MQTT messages. Cached across all reruns."""
+    return {"alert": None, "ota": None, "lock": threading.Lock()}
 
-    paho loop_start() runs the network loop in a daemon thread. The on_message
-    callback writes directly to st.session_state — safe because Streamlit
-    reruns the entire script on each cycle, so the next rerun picks up the
-    latest alert without needing locks.
+
+@st.cache_resource
+def _get_mqtt_client() -> mqtt_client.Client | None:
     """
-    if st.session_state.mqtt_subscribed:
-        return
+    Create and return a persistent MQTT client.
+
+    st.cache_resource caches the return value across all reruns and sessions,
+    so paho connects exactly once per process lifetime — not once per rerun.
+    Incoming messages are stored in _get_mqtt_state() (also cached) and
+    copied to st.session_state in the main script thread on each rerun.
+    """
+    state = _get_mqtt_state()
     try:
         client = mqtt_client.Client(client_id="sdv-dashboard")
+
         def on_message(_client, _userdata, msg):
             try:
                 data = json.loads(msg.payload.decode())
-                if msg.topic == AI_ALERT_TOPIC:
-                    st.session_state.ai_alert = data
-                elif msg.topic == OTA_STATUS_TOPIC:
-                    st.session_state.ota_status = data
+                with state["lock"]:
+                    if msg.topic == AI_ALERT_TOPIC:
+                        state["alert"] = data
+                    elif msg.topic == OTA_STATUS_TOPIC:
+                        state["ota"] = data
             except Exception:
                 pass
+
         client.on_message = on_message
         apply_tls(client)
         client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
         client.subscribe(AI_ALERT_TOPIC)
         client.subscribe(OTA_STATUS_TOPIC)
         client.loop_start()
-        st.session_state.mqtt_subscribed = True
-        log.info(f"Subscribed to AI alert topic: {AI_ALERT_TOPIC}")
+        print(f"[dashboard] MQTT connected → {MQTT_HOST}:{MQTT_PORT}", flush=True)
+        return client
     except Exception as exc:
-        log.warning(f"AI alert MQTT subscription failed: {exc}")
+        print(f"[dashboard] MQTT subscription failed: {exc}", flush=True)
+        return None
+
+
+def init_mqtt_alert_listener() -> None:
+    """Ensure the cached MQTT client is initialised and sync state to session."""
+    _get_mqtt_client()  # triggers creation on first call; cached thereafter
+    state = _get_mqtt_state()
+    with state["lock"]:
+        if state["alert"] is not None:
+            st.session_state.ai_alert = state["alert"]
+        if state["ota"] is not None:
+            st.session_state.ota_status = state["ota"]
 
 
 def render_ota_status() -> None:
@@ -460,7 +484,7 @@ def main() -> None:
     )
 
     init_session_state()
-    init_mqtt_alert_listener()
+    init_mqtt_alert_listener()  # connect once + sync state → session_state
 
     render_header()
     st.divider()

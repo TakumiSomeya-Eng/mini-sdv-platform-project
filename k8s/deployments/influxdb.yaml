@@ -17,7 +17,7 @@ spec:
         app: influxdb
     spec:
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      dnsPolicy: Default
       containers:
         - name: influxdb
           image: influxdb:2.7
@@ -76,7 +76,7 @@ spec:
         app: influxdb-writer
     spec:
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      dnsPolicy: Default
       containers:
         - name: influxdb-writer
           image: localhost:5000/sdv/influxdb-writer:latest

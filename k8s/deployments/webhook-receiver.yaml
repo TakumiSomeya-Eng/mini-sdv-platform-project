@@ -26,7 +26,7 @@ spec:
         app: webhook-receiver
     spec:
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      dnsPolicy: Default
       containers:
         - name: webhook-receiver
           image: localhost:5000/sdv/webhook-receiver:latest

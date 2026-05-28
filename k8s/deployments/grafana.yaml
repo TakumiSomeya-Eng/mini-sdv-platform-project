@@ -17,7 +17,7 @@ spec:
         app: grafana
     spec:
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      dnsPolicy: Default
       containers:
         - name: grafana
           image: grafana/grafana:10.4.3

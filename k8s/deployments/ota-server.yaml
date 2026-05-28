@@ -17,7 +17,7 @@ spec:
         app: ota-server
     spec:
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      dnsPolicy: Default
       containers:
         - name: ota-server
           image: localhost:5000/sdv/ota-server:latest

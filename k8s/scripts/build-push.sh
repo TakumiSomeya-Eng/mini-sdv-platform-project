@@ -11,7 +11,7 @@ docker run -d --network host --name sdv-registry registry:2 2>/dev/null \
   || echo "Registry already running."
 
 echo "=== [2/2] Building and pushing images ==="
-SERVICES=(mqtt-bridge ai-monitor ota-manager ota-server influxdb-writer webhook-receiver)
+SERVICES=(mqtt-bridge ai-monitor ota-manager ota-server influxdb-writer webhook-receiver dashboard)
 
 for SERVICE in "${SERVICES[@]}"; do
   echo "--- Building: $SERVICE ---"
