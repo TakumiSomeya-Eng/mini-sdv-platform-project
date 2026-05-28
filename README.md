@@ -30,61 +30,72 @@ All vehicle data flows through a central **Vehicle Abstraction Layer (VAL)**. Ap
 
 ## Current Architecture (Milestone 14)
 
+### Signal Pipeline
+
 ```mermaid
-flowchart TD
-    subgraph WSL2["WSL2 Ubuntu — custom kernel 6.18"]
+flowchart LR
+    subgraph wsl["WSL2 — custom kernel 6.18"]
         ECU["ECU Simulator\nPowertrain / BMS / HVAC"]
         GW["CAN Gateway\nvcan0 → gRPC"]
-        ECU -->|"CAN frames 0x100/200/300"| GW
+        ECU -->|"CAN 0x100/200/300"| GW
     end
 
-    subgraph K8s["Kubernetes / k3s — namespace: sdv (hostNetwork: true)"]
-        DB["Databroker :55555\n(Kuksa VAL)"]
-
-        subgraph Signal["Signal Pipeline"]
-            MB["mqtt-bridge"]
-            RB["ros2-bridge"]
-            AI["ai-monitor"]
-            IW["influxdb-writer"]
-        end
-
-        subgraph Infra["Infrastructure"]
-            MQ["Mosquitto :8883\nmTLS + ACL"]
-            RS["ros2-subscriber"]
-            DASH["Dashboard :8501"]
-        end
-
-        subgraph Obs["Observability"]
-            IDB["InfluxDB :8086"]
-            GF["Grafana :3000"]
-            TP["Tempo :4318 / :3200"]
-            WH["Webhook Receiver :9000"]
-        end
-
-        subgraph OTA["OTA"]
-            OTAS["OTA Server :8080"]
-            OTAM["OTA Manager"]
-        end
+    subgraph k8s["k3s — namespace: sdv"]
+        DB[("Databroker\n:55555")]
+        MB["mqtt-bridge"]
+        AI["ai-monitor"]
+        IW["influxdb-writer"]
+        DASH["Dashboard\n:8501"]
+        MQ["Mosquitto\n:8883 mTLS+ACL"]
+        RB["ros2-bridge"]
+        RS["ros2-subscriber"]
     end
 
-    Claude["Claude API"]
+    CL(("Claude API"))
 
     GW -->|gRPC| DB
-    DB -->|gRPC stream| MB & RB & AI
-    DB -->|gRPC poll| IW & DASH
-    MB -->|MQTT mTLS| MQ
-    AI -->|MQTT alerts| MQ
+    DB -->|stream| MB
+    DB -->|stream| AI
+    DB -->|stream| RB
+    DB -->|poll| IW
+    DB -->|poll| DASH
+    MB -->|MQTT| MQ
+    AI -->|alerts| MQ
     RB -->|DDS| RS
-    AI <-->|HTTPS| Claude
-    IW -->|write| IDB
-    IDB --> GF
-    OTAS <-->|poll 30s| OTAM
-    MB & AI & OTAM -->|OTel OTLP/HTTP| TP
-    TP --> GF
-    GF -->|webhook| WH
+    AI <-->|HTTPS| CL
 ```
 
-> All services are accessible at `localhost:<port>` from Windows via WSL2 automatic port forwarding.
+### Observability + OTA
+
+```mermaid
+flowchart LR
+    subgraph sources["Instrumented Services"]
+        MB["mqtt-bridge"]
+        AI["ai-monitor"]
+        OTM["ota-manager"]
+    end
+
+    subgraph obs["Observability — k3s"]
+        TP["Tempo\n:4318 / :3200"]
+        IDB[("InfluxDB\n:8086")]
+        GF["Grafana\n:3000"]
+        WH["Webhook Receiver\n:9000"]
+        IW["influxdb-writer"]
+    end
+
+    subgraph ota["OTA — k3s"]
+        OTAS["OTA Server\n:8080"]
+    end
+
+    MB & AI & OTM -->|"OTel OTLP/HTTP"| TP
+    IW -->|write| IDB
+    IDB --> GF
+    TP --> GF
+    GF -->|webhook| WH
+    OTM <-->|"poll 30s"| OTAS
+```
+
+> All services bind to `localhost:<port>` — accessible from Windows via WSL2 automatic port forwarding.
 
 ---
 
