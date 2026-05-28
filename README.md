@@ -51,8 +51,6 @@ flowchart LR
         RS["ros2-subscriber"]
     end
 
-    CL(("Claude API"))
-
     GW -->|gRPC| DB
     DB -->|stream| MB
     DB -->|stream| AI
@@ -62,7 +60,6 @@ flowchart LR
     MB -->|MQTT| MQ
     AI -->|alerts| MQ
     RB -->|DDS| RS
-    AI <-->|HTTPS| CL
 ```
 
 ### Observability + OTA
