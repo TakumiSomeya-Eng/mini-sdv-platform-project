@@ -14,15 +14,6 @@
 
 This project teaches SDV architecture by making it runnable. Every component maps to a real pattern used in production automotive software organizations. Built incrementally across 14 milestones, from a bare signal pipeline to a secured, observable, Kubernetes-managed platform.
 
----
-
-## Demo
-
-> **12 microservices** · **CAN bus → AI anomaly detection → Grafana Tempo traces → OTA update** · all on Kubernetes
-
-![Demo](docs/demo/demo.gif)
-
-> 📹 [Full walkthrough video](https://youtu.be/YOUR_VIDEO_ID) — 3 min
 
 ---
 
