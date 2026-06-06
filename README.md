@@ -1,8 +1,28 @@
 # mini-sdv-platform
 
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://python.org)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-k3s-326CE5?logo=kubernetes&logoColor=white)](https://k3s.io)
+[![Claude AI](https://img.shields.io/badge/Claude-Haiku-D97757?logo=anthropic&logoColor=white)](https://anthropic.com)
+[![Grafana](https://img.shields.io/badge/Grafana-10.4-F46800?logo=grafana&logoColor=white)](https://grafana.com)
+[![InfluxDB](https://img.shields.io/badge/InfluxDB-2.7-22ADF6?logo=influxdb&logoColor=white)](https://influxdata.com)
+[![MQTT](https://img.shields.io/badge/MQTT-Mosquitto_2.0-660066?logo=eclipsemosquitto&logoColor=white)](https://mosquitto.org)
+[![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-Tempo-000000?logo=opentelemetry&logoColor=white)](https://opentelemetry.io)
+[![ROS2](https://img.shields.io/badge/ROS2-Humble-22314E?logo=ros&logoColor=white)](https://ros.org)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
 > An educational simulation of a modern **Software Defined Vehicle (SDV)** platform built with open-source tools, running on Kubernetes (k3s) with full observability — distributed tracing, metrics, and alerting.
 
 This project teaches SDV architecture by making it runnable. Every component maps to a real pattern used in production automotive software organizations. Built incrementally across 14 milestones, from a bare signal pipeline to a secured, observable, Kubernetes-managed platform.
+
+---
+
+## Demo
+
+> **12 microservices** · **CAN bus → AI anomaly detection → Grafana Tempo traces → OTA update** · all on Kubernetes
+
+![Demo](docs/demo/demo.gif)
+
+> 📹 [Full walkthrough video](https://youtu.be/YOUR_VIDEO_ID) — 3 min
 
 ---
 
@@ -93,6 +113,98 @@ flowchart LR
 ```
 
 > All services bind to `localhost:<port>` — accessible from Windows via WSL2 automatic port forwarding.
+
+---
+
+## System Boundary & Interface Demarcation
+
+### System Context Diagram
+
+```mermaid
+%%{init: {'theme': 'neutral'}}%%
+flowchart TB
+    subgraph WINDOWS["Windows 11 Host"]
+        subgraph WSL2["WSL2 — Linux Kernel 6.18"]
+            subgraph CAN_LAYER["① ECU / CAN Layer  (WSL2 native)"]
+                ECU["ECU Simulator\nPowertrain / BMS / HVAC"]
+                VCAN["vcan0\nSocketCAN"]
+                GW["CAN Gateway"]
+            end
+
+            subgraph K8S["② Kubernetes — k3s  /  namespace: sdv"]
+                subgraph VAL_BOX["Vehicle Abstraction Layer"]
+                    DB["Kuksa Databroker\n:55555  gRPC"]
+                end
+
+                subgraph APP_BOX["Application Services"]
+                    MB["mqtt-bridge"]
+                    AI["ai-monitor"]
+                    OTM["ota-manager"]
+                    IW["influxdb-writer"]
+                    DASH["dashboard  :8501"]
+                end
+
+                subgraph INFRA_BOX["Infrastructure Services"]
+                    MQ["Mosquitto  :8883\nmTLS + ACL"]
+                    IDB["InfluxDB  :8086"]
+                    OTAS["ota-server  :8080"]
+                end
+
+                subgraph OBS_BOX["Observability"]
+                    TP["Tempo  :4318 / :3200"]
+                    GF["Grafana  :3000"]
+                end
+            end
+        end
+    end
+
+    subgraph EXT["External  (Internet)"]
+        CLAUDE["Anthropic API\napi.anthropic.com"]
+    end
+
+    ECU -- "CAN frame\n0x100/0x200/0x300" --> VCAN
+    VCAN --> GW
+    GW -- "gRPC  /  VSS publish" --> DB
+    DB -- "gRPC stream" --> MB & AI
+    DB -- "gRPC poll" --> IW & DASH
+    MB -- "MQTT / mTLS" --> MQ
+    AI -- "MQTT / mTLS" --> MQ
+    OTM -- "MQTT / mTLS" --> MQ
+    AI -- "HTTPS / REST" --> CLAUDE
+    OTM -- "HTTP poll" --> OTAS
+    IW -- "HTTP / Line Protocol" --> IDB
+    IDB --> GF
+    TP --> GF
+    MB & AI & OTM -- "OTLP/HTTP" --> TP
+```
+
+### Interface Demarcation Table
+
+| # | Interface | Producer | Consumer | Protocol / Format | Demarcation Point |
+|---|-----------|----------|----------|-------------------|-------------------|
+| ① | ECU → CAN bus | ECU Simulator | CAN Gateway | ISO 11898 CAN frame (8 byte) | Frame ID & payload encoding owned by ECU; Gateway owns decoding logic |
+| ② | CAN → VAL | CAN Gateway | Kuksa Databroker | gRPC / kuksa.val.v1 | Protocol translation owned by Gateway; VSS signal naming owned by Databroker |
+| ③ | VAL → Application | Kuksa Databroker | mqtt-bridge, ai-monitor, influxdb-writer, dashboard | gRPC stream / poll | Databroker owns value delivery; each app owns its subscription lifecycle |
+| ④ | Vehicle → Cloud (V2C) | mqtt-bridge | Mosquitto broker | MQTT 5.0 / mTLS | TLS cert & topic schema owned by bridge; ACL enforcement owned by Mosquitto |
+| ⑤ | Signal Analysis → AI | ai-monitor | Anthropic Claude API | HTTPS / JSON | Prompt design & rate-limit handling owned by ai-monitor; inference owned by API |
+| ⑥ | OTA update | ota-server | ota-manager | HTTP / JSON + SHA-256 | Package provision & checksum generation owned by server; verification & apply owned by manager |
+| ⑦ | Telemetry persistence | influxdb-writer | InfluxDB | HTTP / Line Protocol | Write batching owned by writer; retention policy owned by InfluxDB |
+| ⑧ | Distributed tracing | mqtt-bridge, ai-monitor, ota-manager | Grafana Tempo | OTLP / HTTP (proto) | Span creation owned by each service via OTel SDK; collection & storage owned by Tempo |
+
+### Production Mapping
+
+| This Project | Production SDV Equivalent | Standard / Spec |
+|---|---|---|
+| vcan0 + ECU Simulator | Physical CAN bus + ECU (NXP S32, Renesas R-Car) | ISO 11898, SAE J1939 |
+| CAN Gateway (Python) | Central Gateway ECU | AUTOSAR Classic BSW |
+| Kuksa Databroker | Central Vehicle Computer — VAL | COVESA VSS, AUTOSAR AP |
+| Mosquitto mTLS + ACL | AWS IoT Core / Azure IoT Hub | TLS 1.3, MQTT 5.0 |
+| Anthropic Claude API | In-vehicle LLM / OEM cloud AI | ISO 21448 (SOTIF) |
+| OTA Manager (UPTANE pattern) | Mender / Eclipse hawkBit | UPTANE, UNECE WP.29 |
+| InfluxDB + Grafana | AWS Timestream / Grafana Cloud | OpenMetrics |
+| Grafana Tempo + OTel | Jaeger / Zipkin in production K8s | OpenTelemetry OTLP |
+| k3s single node | EKS / GKE / AKS managed cluster | CNCF Kubernetes |
+| Self-signed CA + mTLS | cert-manager + ACM / Let's Encrypt | X.509, RFC 5280 |
 
 ---
 
