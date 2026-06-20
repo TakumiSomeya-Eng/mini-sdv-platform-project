@@ -39,6 +39,15 @@ kubectl create secret generic ai-secrets \
   -n sdv --dry-run=client -o yaml | kubectl apply -f -
 echo "  Secret 'ai-secrets' applied."
 
+echo "=== [5/5] Creating Runpod Secret (M15) ==="
+# Set RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID in environment before running.
+# training-dispatcher uses optional: true so pods start even without this secret.
+kubectl create secret generic runpod-secrets \
+  --from-literal=RUNPOD_API_KEY="${RUNPOD_API_KEY:-}" \
+  --from-literal=RUNPOD_ENDPOINT_ID="${RUNPOD_ENDPOINT_ID:-}" \
+  -n sdv --dry-run=client -o yaml | kubectl apply -f -
+echo "  Secret 'runpod-secrets' applied (values may be empty — dry-run mode)."
+
 echo ""
 echo "Init complete. Deploy services:"
 echo "  kubectl apply -f ${PROJECT_DIR}/k8s/deployments/"

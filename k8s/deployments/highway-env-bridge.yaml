@@ -1,0 +1,55 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: highway-env-bridge-config
+  namespace: sdv
+data:
+  DATABROKER_HOST: "localhost"
+  DATABROKER_PORT: "55555"
+  MQTT_HOST: "localhost"
+  MQTT_PORT: "8883"
+  MQTT_TLS: "true"
+  MQTT_CA_CERT: "/certs/ca.crt"
+  MQTT_CLIENT_CERT: "/certs/client.crt"
+  MQTT_CLIENT_KEY: "/certs/client.key"
+  VEHICLE_ID: "vehicle-001"
+  HIGHWAY_ENV_ID: "highway-v0"
+  STEP_INTERVAL_SEC: "0.1"
+  # Set RUNPOD_ENDPOINT to switch from IDM baseline to Alpamayo-1 policy (M16)
+  RUNPOD_ENDPOINT: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: highway-env-bridge
+  namespace: sdv
+  labels:
+    app: highway-env-bridge
+    milestone: m15
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: highway-env-bridge
+  template:
+    metadata:
+      labels:
+        app: highway-env-bridge
+    spec:
+      hostNetwork: true
+      dnsPolicy: Default
+      containers:
+        - name: highway-env-bridge
+          image: localhost:5000/sdv/highway-env-bridge:latest
+          envFrom:
+            - configMapRef:
+                name: highway-env-bridge-config
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /certs
+              readOnly: true
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: tls-certs

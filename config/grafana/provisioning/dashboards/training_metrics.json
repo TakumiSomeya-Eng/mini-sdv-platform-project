@@ -1,0 +1,139 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-sdv" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15,
+            "pointSize": 5, "showPoints": "auto", "spanNulls": false
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "AlpaSim Mean Reward",
+      "description": "Episode cumulative reward per evaluation run (higher = better policy)",
+      "type": "timeseries",
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-sdv" },
+          "query": "from(bucket: \"vehicle_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"alpa_sim_eval\" and r._field == \"mean_reward\")\n  |> aggregateWindow(every: v.windowPeriod, fn: last)\n  |> yield(name: \"mean_reward\")",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-sdv" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.03 },
+              { "color": "red", "value": 0.05 }
+            ]
+          },
+          "unit": "percentunit",
+          "max": 0.2, "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "title": "AlpaSim Collision Rate",
+      "description": "OTA gate threshold: < 5%. Red zone blocks automatic promotion.",
+      "type": "timeseries",
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-sdv" },
+          "query": "from(bucket: \"vehicle_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"alpa_sim_eval\" and r._field == \"collision_rate\")\n  |> aggregateWindow(every: v.windowPeriod, fn: last)\n  |> yield(name: \"collision_rate\")",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-sdv" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "spanNulls": false
+          },
+          "unit": "velocitykmh", "min": 0, "max": 150
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "title": "AlpaSim Avg Speed",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-sdv" },
+          "query": "from(bucket: \"vehicle_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"alpa_sim_eval\" and r._field == \"avg_speed_kmh\")\n  |> aggregateWindow(every: v.windowPeriod, fn: last)\n  |> yield(name: \"avg_speed_kmh\")",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-sdv" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "mappings": [
+            { "options": { "0": { "text": "FAIL" }, "1": { "text": "PASS" } }, "type": "value" }
+          ],
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "title": "OTA Gate Status",
+      "description": "1 = collision_rate ≤ 5% → safe to promote checkpoint via OTA",
+      "type": "stat",
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-sdv" },
+          "query": "from(bucket: \"vehicle_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"alpa_sim_eval\" and r._field == \"ota_gate_passed\")\n  |> last()\n  |> yield(name: \"ota_gate\")",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["sdv", "m16", "training", "autonomy"],
+  "time": { "from": "now-3h", "to": "now" },
+  "timepicker": {},
+  "title": "Autonomy Flywheel — Training Metrics",
+  "uid": "sdv-training-metrics",
+  "version": 1
+}

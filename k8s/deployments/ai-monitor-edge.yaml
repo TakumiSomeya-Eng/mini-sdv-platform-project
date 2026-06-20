@@ -1,0 +1,70 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-monitor-edge-config
+  namespace: sdv
+data:
+  DATABROKER_HOST: "localhost"
+  DATABROKER_PORT: "55555"
+  MQTT_HOST: "localhost"
+  MQTT_PORT: "8883"
+  MQTT_TLS: "true"
+  MQTT_CA_CERT: "/certs/ca.crt"
+  MQTT_CLIENT_CERT: "/certs/ai.crt"
+  MQTT_CLIENT_KEY: "/certs/ai.key"
+  VEHICLE_ID: "vehicle-001"
+  MONITOR_INTERVAL_SEC: "10"
+  HISTORY_WINDOW: "10"
+  OTEL_ENABLED: "true"
+  OTEL_ENDPOINT: "http://localhost:4318/v1/traces"
+  # Path to pre-converted Phi-4-mini ONNX directory (mounted via hostPath below)
+  # Service runs in rule-based fallback mode until model is present.
+  MODEL_PATH: "/models/phi4-mini-onnx"
+  MAX_NEW_TOKENS: "200"
+  # M18: Pyroscope profiling endpoint
+  PYROSCOPE_URL: "http://localhost:4040"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-monitor-edge
+  namespace: sdv
+  labels:
+    app: ai-monitor-edge
+    milestone: m17
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-monitor-edge
+  template:
+    metadata:
+      labels:
+        app: ai-monitor-edge
+    spec:
+      hostNetwork: true
+      dnsPolicy: Default
+      containers:
+        - name: ai-monitor-edge
+          image: localhost:5000/sdv/ai-monitor-edge:latest
+          envFrom:
+            - configMapRef:
+                name: ai-monitor-edge-config
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /certs
+              readOnly: true
+            - name: phi4-model
+              mountPath: /models/phi4-mini-onnx
+              readOnly: true
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: tls-certs
+        - name: phi4-model
+          hostPath:
+            # Run scripts/onnx-convert.py to populate this directory.
+            # Until populated, the service uses rule-based anomaly detection.
+            path: /opt/sdv/models/phi4-mini-onnx
+            type: DirectoryOrCreate

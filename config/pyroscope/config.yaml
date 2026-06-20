@@ -1,0 +1,18 @@
+target: all
+
+server:
+  http_listen_port: 4040
+
+storage:
+  backend: filesystem
+  filesystem:
+    dir: /var/lib/pyroscope
+
+# Accept push from pyroscope-io SDK (used by ai-monitor-edge M17/M18)
+# and from onnxruntime inference spans
+self_profiling:
+  disable_push: true
+
+# Retention: keep 7 days of profiles (surface disk is limited)
+limits:
+  max_profile_size_bytes: 10485760  # 10 MB per profile

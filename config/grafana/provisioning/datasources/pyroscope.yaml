@@ -1,0 +1,16 @@
+apiVersion: 1
+
+datasources:
+  - name: Pyroscope
+    type: grafana-pyroscope-datasource
+    uid: pyroscope-sdv
+    url: http://localhost:4040
+    access: proxy
+    jsonData:
+      # Link profiles to traces in Tempo (M18 3-signal correlation)
+      tracesToProfiles:
+        datasourceUid: tempo-sdv
+        tags:
+          - key: service.name
+            value: service_name
+        profileTypeId: process_cpu:cpu:nanoseconds:cpu:nanoseconds

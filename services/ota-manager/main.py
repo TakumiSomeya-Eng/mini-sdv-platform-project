@@ -51,7 +51,7 @@ logging.basicConfig(
 log = logging.getLogger("ota-manager")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-OTA_SERVER_URL  = os.environ.get("OTA_SERVER_URL", "http://localhost:8080")
+OTA_SERVER_URL   = os.environ.get("OTA_SERVER_URL", "http://localhost:8080")
 MQTT_HOST        = os.environ.get("MQTT_HOST", "localhost")
 MQTT_PORT        = int(os.environ.get("MQTT_PORT", "1883"))
 VEHICLE_ID       = os.environ.get("VEHICLE_ID", "vehicle-001")
@@ -61,11 +61,13 @@ MQTT_CLIENT_CERT = os.environ.get("MQTT_CLIENT_CERT", "/certs/client.crt")
 MQTT_CLIENT_KEY  = os.environ.get("MQTT_CLIENT_KEY", "/certs/client.key")
 OTEL_ENABLED     = os.environ.get("OTEL_ENABLED", "false").lower() == "true"
 OTEL_ENDPOINT    = os.environ.get("OTEL_ENDPOINT", "http://localhost:4317")
-POLL_INTERVAL   = int(os.environ.get("POLL_INTERVAL_SEC", "30"))
-ECU_CONFIG_PATH = os.environ.get("ECU_CONFIG_PATH", "/shared/ecu_config.json")
-STATE_FILE      = os.environ.get("OTA_STATE_FILE", "/tmp/ota_state.json")
-STAGING_DIR     = "/tmp/ota-staging"
-STATUS_TOPIC    = f"sdv/{VEHICLE_ID}/ota/status"
+POLL_INTERVAL    = int(os.environ.get("POLL_INTERVAL_SEC", "30"))
+ECU_CONFIG_PATH  = os.environ.get("ECU_CONFIG_PATH", "/shared/ecu_config.json")
+# M15: policy checkpoint destination (for type=checkpoint OTA packages)
+CHECKPOINT_PATH  = os.environ.get("CHECKPOINT_PATH", "/shared/policy.pt")
+STATE_FILE       = os.environ.get("OTA_STATE_FILE", "/tmp/ota_state.json")
+STAGING_DIR      = "/tmp/ota-staging"
+STATUS_TOPIC     = f"sdv/{VEHICLE_ID}/ota/status"
 
 
 # ── Version state ─────────────────────────────────────────────────────────────
@@ -169,10 +171,10 @@ def download_package(url: str, dest: str) -> bool:
 
 # ── OTA lifecycle ─────────────────────────────────────────────────────────────
 
-def apply_package(pkg_path: str) -> bool:
+def apply_config_package(pkg_path: str) -> bool:
+    """Extract ecu_config.json from a .tar.gz and write to ECU_CONFIG_PATH."""
     extract_dir = os.path.join(STAGING_DIR, "extracted")
     os.makedirs(extract_dir, exist_ok=True)
-
     try:
         with tarfile.open(pkg_path) as tar:
             # Security: only extract ecu_config.json, no path traversal
@@ -182,19 +184,34 @@ def apply_package(pkg_path: str) -> bool:
                 log.error("Package contains no ecu_config.json")
                 return False
             tar.extract(members[0], path=extract_dir)
-
         extracted = os.path.join(extract_dir, "ecu_config.json")
         if not os.path.exists(extracted):
             extracted = os.path.join(extract_dir, members[0].name)
-
         os.makedirs(os.path.dirname(ECU_CONFIG_PATH), exist_ok=True)
-        # shutil.copy2 works across filesystem boundaries (bind mount → container /tmp)
         shutil.copy2(extracted, ECU_CONFIG_PATH)
         log.info(f"Config written → {ECU_CONFIG_PATH}")
         return True
     except Exception as exc:
-        log.error(f"Apply failed: {exc}")
+        log.error(f"Config apply failed: {exc}")
         return False
+
+
+def apply_checkpoint_package(pkg_path: str) -> bool:
+    """Copy a .pt policy checkpoint to CHECKPOINT_PATH (M15 extension)."""
+    try:
+        os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
+        shutil.copy2(pkg_path, CHECKPOINT_PATH)
+        log.info(f"Checkpoint written → {CHECKPOINT_PATH} ({os.path.getsize(CHECKPOINT_PATH)/1e6:.1f} MB)")
+        return True
+    except Exception as exc:
+        log.error(f"Checkpoint apply failed: {exc}")
+        return False
+
+
+def apply_package(pkg_path: str, pkg_type: str = "config") -> bool:
+    if pkg_type == "checkpoint":
+        return apply_checkpoint_package(pkg_path)
+    return apply_config_package(pkg_path)
 
 
 def run() -> None:
@@ -236,19 +253,24 @@ def run() -> None:
                 time.sleep(POLL_INTERVAL)
                 continue
 
-            log.info(f"[CHECK] Update available: {installed} → {latest}")
+            pkg_type = pkg_info.get("type", "config")  # M15: "config" | "checkpoint"
+            log.info(f"[CHECK] Update available: {installed} → {latest} (type={pkg_type})")
             root_span.set_attribute("ota.latest_version", latest)
+            root_span.set_attribute("ota.package_type", pkg_type)
             publish_status(
                 mqtt, "downloading",
                 from_version=installed,
                 to_version=latest,
+                package_type=pkg_type,
                 changelog=pkg_info.get("changelog", ""),
             )
 
             # ── DOWNLOAD ─────────────────────────────────────────────────────
-            pkg_path = os.path.join(STAGING_DIR, f"{latest}.tar.gz")
+            ext = ".pt" if pkg_type == "checkpoint" else ".tar.gz"
+            pkg_path = os.path.join(STAGING_DIR, f"{latest}{ext}")
             with tracer.start_as_current_span("package.download") as span:
                 span.set_attribute("ota.version", latest)
+                span.set_attribute("ota.type", pkg_type)
                 ok = download_package(pkg_info["url"], pkg_path)
                 span.set_attribute("download.ok", ok)
             if not ok:
@@ -288,7 +310,8 @@ def run() -> None:
             publish_status(mqtt, "installing", version=latest, previous_version=installed)
             with tracer.start_as_current_span("package.apply") as span:
                 span.set_attribute("ota.version", latest)
-                applied = apply_package(pkg_path)
+                span.set_attribute("ota.type", pkg_type)
+                applied = apply_package(pkg_path, pkg_type)
                 span.set_attribute("apply.ok", applied)
 
             if not applied:

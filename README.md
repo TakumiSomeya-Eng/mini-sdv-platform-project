@@ -1,47 +1,46 @@
 # mini-sdv-platform
 
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.10-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-k3s-326CE5?logo=kubernetes&logoColor=white)](https://k3s.io)
-[![Claude AI](https://img.shields.io/badge/Claude-Haiku-D97757?logo=anthropic&logoColor=white)](https://anthropic.com)
+[![highway-env](https://img.shields.io/badge/highway--env-1.11-00B4D8)](https://github.com/Farama-Foundation/HighwayEnv)
+[![ONNX Runtime](https://img.shields.io/badge/ONNX_Runtime-1.18-005CED?logo=onnx&logoColor=white)](https://onnxruntime.ai)
 [![Grafana](https://img.shields.io/badge/Grafana-10.4-F46800?logo=grafana&logoColor=white)](https://grafana.com)
+[![Pyroscope](https://img.shields.io/badge/Pyroscope-2.0-FF6B35?logo=grafana&logoColor=white)](https://grafana.com/oss/pyroscope)
 [![InfluxDB](https://img.shields.io/badge/InfluxDB-2.7-22ADF6?logo=influxdb&logoColor=white)](https://influxdata.com)
-[![MQTT](https://img.shields.io/badge/MQTT-Mosquitto_2.0-660066?logo=eclipsemosquitto&logoColor=white)](https://mosquitto.org)
+[![MQTT](https://img.shields.io/badge/MQTT-Mosquitto_2.0-660066)](https://mosquitto.org)
 [![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-Tempo-000000?logo=opentelemetry&logoColor=white)](https://opentelemetry.io)
 [![ROS2](https://img.shields.io/badge/ROS2-Humble-22314E?logo=ros&logoColor=white)](https://ros.org)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-> An educational simulation of a modern **Software Defined Vehicle (SDV)** platform built with open-source tools, running on Kubernetes (k3s) with full observability — distributed tracing, metrics, and alerting.
+> An educational simulation of a modern **Software Defined Vehicle (SDV)** platform built with open-source tools, running on Kubernetes (k3s) with full observability, edge AI deployment, and an **Autonomy Flywheel** for continuous RL policy improvement.
 
-This project teaches SDV architecture by making it runnable. Every component maps to a real pattern used in production automotive software organizations. Built incrementally across 14 milestones, from a bare signal pipeline to a secured, observable, Kubernetes-managed platform.
-
+Built incrementally across **18 milestones** — from a bare signal pipeline to a secured, observable, AI-accelerated platform that trains driving policies on Runpod GPUs and deploys them via OTA to edge inference.
 
 ---
 
 ## What Is a Software Defined Vehicle?
 
-A traditional vehicle has dozens of ECUs (Electronic Control Units) communicating peer-to-peer over CAN bus. Each ECU owns its data. Adding a new feature (e.g., cloud telemetry) requires wiring into each relevant ECU individually.
+A traditional vehicle has dozens of ECUs communicating peer-to-peer over CAN bus. Each ECU owns its data. Adding a new feature requires wiring into each relevant ECU individually.
 
 A **Software Defined Vehicle** flips this model:
 
 ```
 Traditional:  ECU-A ←──CAN──→ ECU-B ←──CAN──→ ECU-C
-                ↓
-           (tightly coupled, hard to update or extend)
+                        (tightly coupled, hard to update)
 
 SDV:          ECU-A ─CAN─┐
               ECU-B ─CAN─┼──▶  CAN Gateway  ──▶  Central Middleware  ──▶  Any App
               ECU-C ─CAN─┘      (M4)              (Databroker / VAL)
-                ↓
-           (decoupled — apps subscribe to signals, not ECUs)
+                        (decoupled — apps subscribe to signals, not ECUs)
 ```
 
-All vehicle data flows through a central **Vehicle Abstraction Layer (VAL)**. Applications — the instrument cluster, a cloud backend, an AI safety agent — subscribe to named signals without knowing which ECU produces them.
+All vehicle data flows through a central **Vehicle Abstraction Layer (VAL)**. Applications subscribe to named signals without knowing which ECU produces them. This project adds a second layer: an **Autonomy Flywheel** that continuously improves the driving policy using simulation, cloud training, and OTA deployment.
 
 ---
 
-## Current Architecture (Milestone 14)
+## Architecture
 
-### Signal Pipeline
+### M1–M14: Signal Pipeline & Observability
 
 ```mermaid
 flowchart LR
@@ -54,148 +53,86 @@ flowchart LR
     subgraph k8s["k3s — namespace: sdv"]
         DB[("Databroker\n:55555")]
         MB["mqtt-bridge"]
-        AI["ai-monitor"]
+        AI["ai-monitor\nClaude Haiku"]
         IW["influxdb-writer"]
-        DASH["Dashboard\n:8501"]
+        DASH["dashboard :8501"]
         MQ["Mosquitto\n:8883 mTLS+ACL"]
-        RB["ros2-bridge"]
-        RS["ros2-subscriber"]
+        TP["Tempo :4318"]
+        IDB[("InfluxDB :8086")]
+        GF["Grafana :3000"]
     end
 
     GW -->|gRPC| DB
-    DB -->|stream| MB
-    DB -->|stream| AI
-    DB -->|stream| RB
-    DB -->|poll| IW
-    DB -->|poll| DASH
-    MB -->|MQTT| MQ
-    AI -->|alerts| MQ
-    RB -->|DDS| RS
+    DB -->|stream| MB & AI & IW & DASH
+    MB & AI -->|MQTT mTLS| MQ
+    MB & AI -->|OTLP| TP
+    IW -->|write| IDB
+    IDB & TP --> GF
 ```
 
-### Observability + OTA
+### M15–M18: Autonomy Flywheel
 
 ```mermaid
 flowchart LR
-    subgraph sources["Instrumented Services"]
-        MB["mqtt-bridge"]
-        AI["ai-monitor"]
-        OTM["ota-manager"]
+    subgraph sim["Simulation (WSL2)"]
+        HEB["highway-env-bridge\nhighway-v0 CPU"]
     end
 
-    subgraph obs["Observability — k3s"]
-        TP["Tempo\n:4318 / :3200"]
-        IDB[("InfluxDB\n:8086")]
-        GF["Grafana\n:3000"]
-        WH["Webhook Receiver\n:9000"]
-        IW["influxdb-writer"]
+    subgraph k8s["k3s — namespace: sdv"]
+        DB2[("Databroker\n:55555")]
+        MQ2["Mosquitto\n:8883"]
+        AME["ai-monitor-edge\nPhi-4-mini ONNX\nrule fallback"]
+        SS["scene-search\nLanceDB + MiniLM\n:8093"]
+        TD["training-dispatcher\n:8090"]
+        ALPA["alpa-sim\nhighway-v0 eval\n:8092"]
+        PYR["Pyroscope\n:4040"]
+        GF2["Grafana :3000"]
+        OTAS["ota-server :8080"]
     end
 
-    subgraph ota["OTA — k3s"]
-        OTAS["OTA Server\n:8080"]
+    subgraph ext["External (opt.)"]
+        RP["Runpod\nA100 / RTX 4090"]
     end
 
-    MB & AI & OTM -->|"OTel OTLP/HTTP"| TP
-    IW -->|write| IDB
-    IDB --> GF
-    TP --> GF
-    GF -->|webhook| WH
-    OTM <-->|"poll 30s"| OTAS
+    HEB -->|gRPC VSS| DB2
+    HEB -->|MQTT metrics| MQ2
+    DB2 --> AME
+    MQ2 --> SS
+    MQ2 --> TD
+    TD -->|REST| RP
+    RP -->|checkpoint .pt| OTAS
+    OTAS -.->|OTA| AME
+    ALPA -->|eval policy| RP
+    AME -->|pprof| PYR
+    PYR --> GF2
 ```
 
-> All services bind to `localhost:<port>` — accessible from Windows via WSL2 automatic port forwarding.
+**Flywheel loop**: highway-env-bridge collects driving episodes → training-dispatcher sends them to Runpod GPU → alpa-sim evaluates the trained policy (collision_rate ≤ 5% = OTA gate) → ota-server delivers the checkpoint → ai-monitor-edge runs inference at the edge.
 
 ---
 
-## System Boundary & Interface Demarcation
+## Milestone Progress
 
-### System Context Diagram
-
-```mermaid
-%%{init: {'theme': 'neutral'}}%%
-flowchart TB
-    subgraph WINDOWS["Windows 11 Host"]
-        subgraph WSL2["WSL2 — Linux Kernel 6.18"]
-            subgraph CAN_LAYER["① ECU / CAN Layer  (WSL2 native)"]
-                ECU["ECU Simulator\nPowertrain / BMS / HVAC"]
-                VCAN["vcan0\nSocketCAN"]
-                GW["CAN Gateway"]
-            end
-
-            subgraph K8S["② Kubernetes — k3s  /  namespace: sdv"]
-                subgraph VAL_BOX["Vehicle Abstraction Layer"]
-                    DB["Kuksa Databroker\n:55555  gRPC"]
-                end
-
-                subgraph APP_BOX["Application Services"]
-                    MB["mqtt-bridge"]
-                    AI["ai-monitor"]
-                    OTM["ota-manager"]
-                    IW["influxdb-writer"]
-                    DASH["dashboard  :8501"]
-                end
-
-                subgraph INFRA_BOX["Infrastructure Services"]
-                    MQ["Mosquitto  :8883\nmTLS + ACL"]
-                    IDB["InfluxDB  :8086"]
-                    OTAS["ota-server  :8080"]
-                end
-
-                subgraph OBS_BOX["Observability"]
-                    TP["Tempo  :4318 / :3200"]
-                    GF["Grafana  :3000"]
-                end
-            end
-        end
-    end
-
-    subgraph EXT["External  (Internet)"]
-        CLAUDE["Anthropic API\napi.anthropic.com"]
-    end
-
-    ECU -- "CAN frame\n0x100/0x200/0x300" --> VCAN
-    VCAN --> GW
-    GW -- "gRPC  /  VSS publish" --> DB
-    DB -- "gRPC stream" --> MB & AI
-    DB -- "gRPC poll" --> IW & DASH
-    MB -- "MQTT / mTLS" --> MQ
-    AI -- "MQTT / mTLS" --> MQ
-    OTM -- "MQTT / mTLS" --> MQ
-    AI -- "HTTPS / REST" --> CLAUDE
-    OTM -- "HTTP poll" --> OTAS
-    IW -- "HTTP / Line Protocol" --> IDB
-    IDB --> GF
-    TP --> GF
-    MB & AI & OTM -- "OTLP/HTTP" --> TP
-```
-
-### Interface Demarcation Table
-
-| # | Interface | Producer | Consumer | Protocol / Format | Demarcation Point |
-|---|-----------|----------|----------|-------------------|-------------------|
-| ① | ECU → CAN bus | ECU Simulator | CAN Gateway | ISO 11898 CAN frame (8 byte) | Frame ID & payload encoding owned by ECU; Gateway owns decoding logic |
-| ② | CAN → VAL | CAN Gateway | Kuksa Databroker | gRPC / kuksa.val.v1 | Protocol translation owned by Gateway; VSS signal naming owned by Databroker |
-| ③ | VAL → Application | Kuksa Databroker | mqtt-bridge, ai-monitor, influxdb-writer, dashboard | gRPC stream / poll | Databroker owns value delivery; each app owns its subscription lifecycle |
-| ④ | Vehicle → Cloud (V2C) | mqtt-bridge | Mosquitto broker | MQTT 5.0 / mTLS | TLS cert & topic schema owned by bridge; ACL enforcement owned by Mosquitto |
-| ⑤ | Signal Analysis → AI | ai-monitor | Anthropic Claude API | HTTPS / JSON | Prompt design & rate-limit handling owned by ai-monitor; inference owned by API |
-| ⑥ | OTA update | ota-server | ota-manager | HTTP / JSON + SHA-256 | Package provision & checksum generation owned by server; verification & apply owned by manager |
-| ⑦ | Telemetry persistence | influxdb-writer | InfluxDB | HTTP / Line Protocol | Write batching owned by writer; retention policy owned by InfluxDB |
-| ⑧ | Distributed tracing | mqtt-bridge, ai-monitor, ota-manager | Grafana Tempo | OTLP / HTTP (proto) | Span creation owned by each service via OTel SDK; collection & storage owned by Tempo |
-
-### Production Mapping
-
-| This Project | Production SDV Equivalent | Standard / Spec |
-|---|---|---|
-| vcan0 + ECU Simulator | Physical CAN bus + ECU (NXP S32, Renesas R-Car) | ISO 11898, SAE J1939 |
-| CAN Gateway (Python) | Central Gateway ECU | AUTOSAR Classic BSW |
-| Kuksa Databroker | Central Vehicle Computer — VAL | COVESA VSS, AUTOSAR AP |
-| Mosquitto mTLS + ACL | AWS IoT Core / Azure IoT Hub | TLS 1.3, MQTT 5.0 |
-| Anthropic Claude API | In-vehicle LLM / OEM cloud AI | ISO 21448 (SOTIF) |
-| OTA Manager (UPTANE pattern) | Mender / Eclipse hawkBit | UPTANE, UNECE WP.29 |
-| InfluxDB + Grafana | AWS Timestream / Grafana Cloud | OpenMetrics |
-| Grafana Tempo + OTel | Jaeger / Zipkin in production K8s | OpenTelemetry OTLP |
-| k3s single node | EKS / GKE / AKS managed cluster | CNCF Kubernetes |
-| Self-signed CA + mTLS | cert-manager + ACM / Let's Encrypt | X.509, RFC 5280 |
+| M | Title | Key Technology | SDV Concept |
+|---|-------|---------------|-------------|
+| **M1** ✅ | Kuksa Databroker + Dashboard | Kuksa 0.4.4, Streamlit, gRPC | Vehicle Abstraction Layer (VAL) |
+| **M2** ✅ | MQTT Bridge + Mosquitto | paho-mqtt, MQTT 5.0 | V2C (Vehicle-to-Cloud) gateway |
+| **M3** ✅ | ROS2 Bridge | ROS2 Humble, DDS, CycloneDDS | AD stack middleware integration |
+| **M4** ✅ | CAN Bus Simulation | SocketCAN, vcan0, custom kernel 6.18 | ECU → Central Gateway → VAL |
+| **M5** ✅ | AI Signal Monitor | Claude Haiku API, Observe-Reason-Act | LLM-based anomaly detection |
+| **M6** ✅ | OTA Update Pipeline | Flask, SHA-256, UPTANE pattern | CHECK → DOWNLOAD → VERIFY → APPLY |
+| **M7** ✅ | Time-Series + Grafana | InfluxDB 2.7, Flux, Grafana 10.4 | Fleet telemetry persistence |
+| **M8** ✅ | Fleet Simulator | Multi-vehicle, parallel threads | Multi-vehicle cloud ingestion |
+| **M9** ✅ | Grafana Alerting | Alert rules, Webhook receiver | Anomaly alert routing (PagerDuty pattern) |
+| **M10** ✅ | TLS / mTLS | OpenSSL, SAN certs, mutual auth | Per-service client certificates |
+| **M11** ✅ | MQTT ACL / RBAC | Mosquitto ACL, MQTT 5.0 | Topic-level authorization |
+| **M12** ✅ | OpenTelemetry + Tracing | OTel SDK, OTLP/HTTP | Distributed tracing — 3 pillars of observability |
+| **M13** ✅ | Grafana Tempo | Tempo, TraceQL, WAL | Unified metrics + traces in Grafana |
+| **M14** ✅ | Kubernetes (k3s) | k3s, Deployment, ConfigMap, Secret | Declarative orchestration, rolling updates |
+| **M15** ✅ | Compute Plane | highway-env 1.11, Runpod Serverless API | RL environment + cloud GPU dispatch |
+| **M16** ✅ | Autonomy Flywheel | PPO, ONNX FP16/INT4, AlpaSim OTA gate | Simulation → Train → Evaluate → Deploy loop |
+| **M17** ✅ | Edge AI Deployment | Phi-4-mini ONNX, LanceDB, all-MiniLM-L6-v2 | On-device inference + semantic scene retrieval |
+| **M18** ✅ | Continuous Profiling | Pyroscope 2.0, pyroscope-io SDK, Grafana | CPU flame graphs linked to traces and metrics |
 
 ---
 
@@ -204,49 +141,92 @@ flowchart TB
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | **Orchestration** | k3s (Kubernetes) | Pod lifecycle, rolling updates, Secret management |
-| **Vehicle MW** | Eclipse Kuksa Databroker 0.4.4 | Vehicle Abstraction Layer, VSS signals via gRPC |
-| **CAN Bus** | SocketCAN / vcan0 (Linux kernel) | Virtual CAN bus (ECU simulation) |
-| **Messaging** | Eclipse Mosquitto 2.0 | MQTT broker with mTLS + ACL/RBAC |
-| **AI** | Anthropic Claude Haiku | LLM-based signal anomaly detection |
+| **Vehicle MW** | Eclipse Kuksa Databroker 0.4.4 | VAL — VSS signals over gRPC |
+| **CAN Bus** | SocketCAN / vcan0 (Linux kernel 6.18) | Virtual CAN bus for ECU simulation |
+| **Messaging** | Eclipse Mosquitto 2.0 | MQTT 5.0 broker with mTLS + topic ACL |
+| **AI (cloud)** | Anthropic Claude Haiku | LLM anomaly detection (M5) |
+| **AI (edge)** | Microsoft Phi-4-mini + ONNX Runtime 1.18 | On-device inference, MIT license |
+| **RL Simulation** | highway-env 1.11 + Gymnasium | CPU driving simulation, policy evaluation |
+| **GPU Training** | Runpod Serverless (A100 / RTX 4090) | PPO + LoRA fine-tuning, ≤$10/loop |
+| **Vector Store** | LanceDB + all-MiniLM-L6-v2 | Semantic driving scene retrieval |
 | **Time-series DB** | InfluxDB 2.7 + Flux | Vehicle telemetry persistence |
-| **Visualization** | Grafana 10.4.3 | Metrics dashboards + Alerting |
+| **Visualization** | Grafana 10.4.3 | Metrics + Traces + Profiles unified dashboard |
 | **Tracing** | Grafana Tempo + OTel SDK | Distributed traces (TraceQL) |
-| **OTA** | Flask + SHA-256 | UPTANE-simplified OTA update pipeline |
-| **Security** | mTLS (self-signed CA) + MQTT ACL | Per-service client certs, topic-level authorization |
+| **Profiling** | Grafana Pyroscope 2.0 | Continuous CPU flame graphs + trace linking |
+| **OTA** | Flask + SHA-256 (UPTANE pattern) | Config `.tar.gz` + policy checkpoint `.pt` |
+| **Security** | mTLS (self-signed CA) + MQTT ACL | Per-service client certs, topic-level authz |
 | **ROS2** | Humble + CycloneDDS | Autonomous driving middleware integration |
 
 ---
 
-## Milestone Progress
+## Services
 
-| M | Title | Key Technology | Production Concept |
-|---|-------|---------------|-------------------|
-| **M1** ✅ | Kuksa Databroker + Dashboard | Kuksa, Streamlit, gRPC | Vehicle Abstraction Layer |
-| **M2** ✅ | MQTT Bridge + Mosquitto | paho-mqtt, MQTT | V2C (Vehicle-to-Cloud) gateway |
-| **M3** ✅ | ROS2 Bridge | ROS2, DDS, CycloneDDS | AD stack integration |
-| **M4** ✅ | CAN Bus Simulation | SocketCAN, vcan0, custom kernel | ECU → CAN Gateway → Databroker |
-| **M5** ✅ | AI Signal Monitor | Claude API, Observe-Reason-Act | LLM-based anomaly detection |
-| **M6** ✅ | OTA Update Pipeline | Flask, SHA-256, UPTANE pattern | CHECK→DOWNLOAD→VERIFY→APPLY |
-| **M7** ✅ | Time-Series + Grafana | InfluxDB 2.x, Flux, Grafana | Fleet telemetry persistence & visualization |
-| **M8** ✅ | Fleet Simulator | Multi-vehicle, parallel threads | Multi-vehicle cloud ingestion |
-| **M9** ✅ | Grafana Alerting | Alert rules, Webhook | Anomaly alert routing (PagerDuty pattern) |
-| **M10** ✅ | TLS / mTLS | OpenSSL, SAN, mutual auth | Per-service client certificates |
-| **M11** ✅ | MQTT ACL / RBAC | Mosquitto ACL, MQTT 5.0 | Topic-level authorization |
-| **M12** ✅ | OpenTelemetry + Jaeger | OTel SDK, OTLP/HTTP | Distributed tracing — 3 pillars of observability |
-| **M13** ✅ | Grafana Tempo | Tempo, TraceQL, WAL | Unified observability (metrics + traces in Grafana) |
-| **M14** ✅ | Kubernetes (k3s) | k3s, Deployment, ConfigMap, Secret | Declarative orchestration, rolling updates |
+### M1–M14 (Signal Pipeline)
+
+| Service | Port | Description |
+|---------|------|-------------|
+| `databroker` | 55555 | Vehicle Abstraction Layer (Kuksa) |
+| `mosquitto` | 8883 | MQTT broker (mTLS + ACL) |
+| `mqtt-bridge` | — | Kuksa → MQTT (V2C gateway) + OTel |
+| `ai-monitor` | — | Claude Haiku anomaly detection + OTel |
+| `ota-server` | 8080 | OTA package registry (config + checkpoint) |
+| `ota-manager` | — | Vehicle-side OTA agent + OTel |
+| `influxdb` | 8086 | Time-series database |
+| `influxdb-writer` | — | Kuksa → InfluxDB writer |
+| `grafana` | 3000 | Dashboards + Alerting |
+| `tempo` | 3200 / 4318 | Distributed trace backend |
+| `webhook-receiver` | 9000 | Grafana alert webhook sink |
+
+### M15–M18 (Autonomy Flywheel)
+
+| Service | Port | Description |
+|---------|------|-------------|
+| `highway-env-bridge` | — | highway-v0 simulation → Kuksa gRPC + MQTT CAN frames |
+| `training-dispatcher` | 8090 | Runpod job dispatch + MQTT result publish |
+| `alpa-sim` | 8092 | Policy evaluation harness (OTA gate: collision ≤ 5%) |
+| `ai-monitor-edge` | — | Phi-4-mini ONNX inference + Pyroscope profiling |
+| `scene-search` | 8093 | LanceDB semantic scene retrieval (all-MiniLM-L6-v2) |
+| `pyroscope` | 4040 | Continuous CPU profiling backend |
+
+---
+
+## Testing
+
+Three-phase test strategy; all phases automated via pytest.
+
+```
+tests/                  ← Phase 1: Unit (28 tests, no external deps)
+tests_integration/      ← Phase 2: Integration (real highway-env, LanceDB, SentenceTransformers)
+                        ← Phase 3: E2E (live k3s services; auto-skip when not running)
+```
+
+```bash
+# Phase 1 — unit tests (always runnable)
+pytest -c pytest.ini -v
+
+# Phase 2 + 3 — integration / E2E (requires packages: highway-env, lancedb, sentence-transformers)
+$env:PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION = "python"
+pytest -c pytest-integration.ini -v
+```
+
+| Phase | Tests | Requirement |
+|-------|-------|-------------|
+| 1 Unit | 28/28 PASS | Python only (stubbed deps) |
+| 2 Integration | 15 PASS / 1 SKIP | highway-env, lancedb, sentence-transformers installed |
+| 3 E2E | auto-skip → PASS when live | k3s services + MQTT broker + Pyroscope running |
 
 ---
 
 ## Prerequisites
 
 - **Windows 11** with WSL2
-- **WSL2 Ubuntu** (Ubuntu 24.04 recommended)
-- **Custom WSL2 kernel 6.18** with SocketCAN support (see [M4 TRD](docs/milestone-4/TRD.md))
-- **Python venv** in WSL2 (`~/sdv-venv`) with `python-can` and `kuksa-client`
-- **Anthropic API key** — set `ANTHROPIC_API_KEY` in environment
+- **WSL2 Ubuntu 24.04** with custom kernel 6.18 (SocketCAN support — see [M4 TRD](docs/milestone-4/TRD.md))
+- **Python 3.10** venv with `highway-env`, `lancedb`, `sentence-transformers`, `paho-mqtt`, `flask`
+- **Anthropic API key** — `ANTHROPIC_API_KEY` (for ai-monitor / M5)
+- **Runpod account + endpoint** — optional; training-dispatcher runs in dry-run mode without it
+- **Phi-4-mini ONNX model** — optional; ai-monitor-edge falls back to rule-based detection
 
-> **Note on Docker**: This project uses Docker Engine directly inside WSL2 (not Docker Desktop). The custom kernel has `ip_tables.ko` and bridge networking unavailable, which prevents Docker Desktop from starting reliably. Docker Engine with `{"iptables": false, "bridge": "none"}` works correctly because all services use host networking.
+> **Docker note**: This project uses Docker Engine directly inside WSL2 (not Docker Desktop). The custom kernel has `ip_tables.ko` and bridge networking unavailable. Use `{"iptables": false, "bridge": "none"}` in `/etc/docker/daemon.json`.
 
 ---
 
@@ -254,43 +234,36 @@ flowchart TB
 
 All commands run in a **WSL2 Ubuntu terminal**.
 
-### 1. Start Docker Engine
+### 1. Start Docker Engine & k3s
 
 ```bash
-# First time or after rebooting Windows:
 echo '{"iptables": false, "bridge": "none"}' | sudo tee /etc/docker/daemon.json
 sudo service docker start
-docker ps   # verify: empty table = Docker is running
-```
-
-### 2. Start k3s
-
-```bash
 sudo systemctl start k3s
-kubectl get nodes   # verify: laptop-xxx   Ready
+kubectl get nodes   # → Ready
 ```
 
-### 3. Deploy the Platform
+### 2. Deploy the Platform
 
 ```bash
 cd "/mnt/c/Users/takum/OneDrive/デスクトップ/Personal-Project/02_mini-sdv-platform project"
 
-# (First time only) Install k3s and build images:
+# First time only — build images and configure secrets
 bash k8s/scripts/setup-k3s.sh
 bash k8s/scripts/build-push.sh
 bash k8s/scripts/init-config.sh
 
-# Deploy all services:
+# Deploy all 18 milestones
 export ANTHROPIC_API_KEY="sk-ant-..."
+kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/deployments/
-kubectl get pods -n sdv   # all 11 pods → Running
+kubectl get pods -n sdv   # all pods → Running
 ```
 
-### 4. Start CAN Signal Pipeline (WSL2)
+### 3. Start CAN Signal Pipeline (WSL2)
 
 ```bash
-# Bootstrap SocketCAN
-bash scripts/setup-wsl2.sh
+bash scripts/setup-wsl2.sh                          # SocketCAN bootstrap
 
 # Terminal A — CAN Gateway
 ~/sdv-venv/bin/python services/can-gateway/main.py
@@ -298,26 +271,29 @@ bash scripts/setup-wsl2.sh
 # Terminal B — ECU Simulator
 ECU_CONFIG_PATH=/tmp/sdv-ota/ecu_config.json \
   ~/sdv-venv/bin/python services/ecu-simulator/main.py
+
+# Terminal C — highway-env driving simulation (M15)
+~/sdv-venv/bin/python services/highway-env-bridge/main.py
 ```
 
-### 5. Open in Windows Browser
+### 4. Open in Windows Browser
 
 | URL | Service |
 |-----|---------|
-| `http://localhost:8501` | Streamlit Dashboard |
-| `http://localhost:3000` | Grafana (admin / admin) |
+| `http://localhost:3000` | Grafana — Dashboards, Traces, Profiles |
+| `http://localhost:8501` | Streamlit Vehicle Dashboard |
+| `http://localhost:4040` | Pyroscope Flame Graphs |
 | `http://localhost:8086` | InfluxDB (admin / sdv-password) |
+| `http://localhost:8092/health` | alpa-sim |
+| `http://localhost:8093/health` | scene-search |
 
 ---
 
-## Key Verification Commands
+## Key Commands
 
 ```bash
-# All pods running
+# All pods
 kubectl get pods -n sdv
-
-# Distributed traces in Grafana Explore → Tempo
-# Query: {resource.service.name="ai-monitor"}
 
 # Live MQTT telemetry (mTLS)
 mosquitto_sub -h localhost -p 8883 \
@@ -326,54 +302,49 @@ mosquitto_sub -h localhost -p 8883 \
   --key config/certs/dashboard.key \
   -t "sdv/vehicle-001/#" -v
 
-# Trigger OTA update
+# Trigger OTA update (config package)
 curl -X POST http://localhost:8080/release/1.1.0
 
-# Rolling restart (zero downtime)
-kubectl rollout restart deployment/ai-monitor -n sdv
-kubectl rollout status deployment/ai-monitor -n sdv
+# Run AlpaSim evaluation (IDM baseline, 5 episodes)
+curl -X POST http://localhost:8092/evaluate \
+  -H "Content-Type: application/json" \
+  -d '{"episodes": 5, "model_tag": "idm-baseline"}'
 
-# Service logs
-kubectl logs -n sdv -l app=ai-monitor --tail=20 -f
+# Semantic scene search
+curl "http://localhost:8093/scenes/search?q=highway+collision&k=3"
+
+# Submit training job to Runpod (dry-run when no API key)
+curl -X POST http://localhost:8090/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"algorithm": "ppo", "env_id": "highway-v0", "num_steps": 50000}'
+
+# Rolling restart with zero downtime
+kubectl rollout restart deployment/ai-monitor-edge -n sdv
+kubectl rollout status  deployment/ai-monitor-edge -n sdv
 ```
 
 ---
 
-## Services (M14)
+## Production Mapping
 
-| Service | Image | Port | Description |
-|---------|-------|------|-------------|
-| `databroker` | kuksa-databroker:0.4.4 | 55555 | Vehicle Abstraction Layer |
-| `mosquitto` | eclipse-mosquitto:2.0 | 8883 | MQTT broker (mTLS + ACL) |
-| `mqtt-bridge` | local/sdv/mqtt-bridge | — | Kuksa → MQTT (V2C gateway) |
-| `ai-monitor` | local/sdv/ai-monitor | — | LLM anomaly detection (Claude) |
-| `ota-server` | local/sdv/ota-server | 8080 | OTA package registry |
-| `ota-manager` | local/sdv/ota-manager | — | Vehicle-side OTA agent |
-| `influxdb` | influxdb:2.7 | 8086 | Time-series database |
-| `influxdb-writer` | local/sdv/influxdb-writer | — | Kuksa → InfluxDB writer |
-| `grafana` | grafana/grafana:10.4.3 | 3000 | Dashboards + Alerting |
-| `tempo` | grafana/tempo:latest | 3200/4318 | Distributed trace backend |
-| `webhook-receiver` | local/sdv/webhook-receiver | 9000 | Grafana alert sink |
-
-*ROS2 services (ros2-bridge, ros2-subscriber) and fleet-simulator run via Docker Compose.*
-
----
-
-## How This Maps to Real SDV Systems
-
-| This Project | Production SDV |
-|---|---|
-| vcan0 (SocketCAN) | Physical CAN bus (ISO 11898, 500 kbps) |
-| ECU Simulator (Python) | Physical ECU (NXP S32, Renesas R-Car) |
-| CAN Gateway (Python) | Central Gateway ECU (AUTOSAR BSW) |
-| Kuksa Databroker | Central Vehicle Computer — VAL |
-| Mosquitto (mTLS + ACL) | AWS IoT Core / Azure IoT Hub (TLS + policy) |
-| AI Monitor + Claude API | OEM cloud AI safety monitor / in-vehicle LLM |
-| OTA Manager (UPTANE pattern) | Mender / Eclipse hawkBit / OEM OTA agent |
-| InfluxDB + Grafana | AWS Timestream / Grafana Cloud fleet analytics |
-| Grafana Tempo + TraceQL | Jaeger / Grafana Tempo in production K8s |
-| k3s (single node) | EKS / GKE / AKS (managed multi-node) |
-| Self-signed CA + client certs | cert-manager + ACM / Let's Encrypt |
+| This Project | Production SDV | Spec / Standard |
+|---|---|---|
+| vcan0 + ECU Simulator | Physical CAN bus + ECU (NXP S32, Renesas R-Car) | ISO 11898, SAE J1939 |
+| CAN Gateway (Python) | Central Gateway ECU | AUTOSAR Classic BSW |
+| Kuksa Databroker | Central Vehicle Computer — VAL | COVESA VSS, AUTOSAR AP |
+| Mosquitto mTLS + ACL | AWS IoT Core / Azure IoT Hub | TLS 1.3, MQTT 5.0 |
+| Claude Haiku (M5) | OEM cloud AI safety monitor | ISO 21448 (SOTIF) |
+| Phi-4-mini ONNX (M17) | In-vehicle neural network (NPU/MCU) | ISO 21448, AUTOSAR ML |
+| highway-env + PPO (M15/16) | Closed-loop simulation (CARLA, LGSVL) | ISO 21448 |
+| Runpod GPU training (M15) | OEM ML training cluster (AWS SageMaker) | MLOps best practices |
+| alpa-sim OTA gate (M16) | Simulation-based safety gate (Waymo sim eval) | ISO 26262 functional safety |
+| LanceDB scene search (M17) | In-vehicle semantic memory / situational awareness | COVESA VSS extensions |
+| Pyroscope profiling (M18) | Automotive SW performance profiler (Lauterbach) | AUTOSAR Adaptive diagnostics |
+| OTA Manager (UPTANE pattern) | Mender / Eclipse hawkBit | UPTANE, UNECE WP.29 |
+| InfluxDB + Grafana | AWS Timestream / Grafana Cloud | OpenMetrics |
+| Grafana Tempo + OTel | Jaeger / Zipkin in production K8s | OpenTelemetry OTLP |
+| k3s single node | EKS / GKE / AKS managed cluster | CNCF Kubernetes |
+| Self-signed CA + mTLS | cert-manager + ACM / Let's Encrypt | X.509, RFC 5280 |
 
 ---
 
@@ -381,50 +352,80 @@ kubectl logs -n sdv -l app=ai-monitor --tail=20 -f
 
 ```
 mini-sdv-platform/
-├── docker-compose.yml              ← ROS2 + fleet-simulator (host networking)
 ├── README.md
+├── pytest.ini                      ← Phase 1 unit test config
+├── pytest-integration.ini          ← Phase 2/3 integration test config
 │
-├── k8s/                            ← M14: Kubernetes manifests
+├── k8s/
 │   ├── namespace.yaml
-│   ├── deployments/                ← 11 Deployments + ConfigMaps
+│   ├── deployments/                ← 18 Deployments + ConfigMaps
+│   │   ├── databroker.yaml         ← M1
+│   │   ├── mosquitto.yaml          ← M2
+│   │   ├── ...                     ← M3–M14
+│   │   ├── highway-env-bridge.yaml ← M15
+│   │   ├── training-dispatcher.yaml
+│   │   ├── alpa-sim.yaml           ← M16
+│   │   ├── ai-monitor-edge.yaml    ← M17
+│   │   ├── scene-search.yaml
+│   │   └── pyroscope.yaml          ← M18
 │   └── scripts/
-│       ├── setup-k3s.sh            ← k3s install + registry config
-│       ├── build-push.sh           ← docker build → localhost:5000
-│       └── init-config.sh          ← copy configs + create Secrets
-│
-├── config/
-│   ├── certs/                      ← TLS certs (gitignored, generated by script)
-│   ├── mosquitto/
-│   │   ├── mosquitto.conf          ← M10: mTLS + M11: ACL config
-│   │   └── acl                     ← M11: per-CN topic permissions
-│   ├── grafana/
-│   │   ├── grafana.ini
-│   │   └── provisioning/           ← M7: datasources, dashboards, alerting
-│   ├── tempo/tempo.yaml            ← M13: Tempo OTLP config
-│   ├── vss/vss_mini_covesa.json    ← VSS catalog (loaded by Databroker)
-│   └── ota/                        ← M6: manifest + packages/
-│
-├── scripts/
-│   ├── setup-wsl2.sh               ← M4: SocketCAN + Docker Engine bootstrap
-│   └── generate-certs.sh           ← M10: CA + server + per-service client certs
+│       ├── setup-k3s.sh
+│       ├── build-push.sh
+│       └── init-config.sh
 │
 ├── services/
-│   ├── ecu-simulator/              ← M4: CAN TX (WSL2 native)
-│   ├── can-gateway/                ← M4: CAN RX → Databroker gRPC (WSL2 native)
-│   ├── dashboard/                  ← M1: Streamlit live dashboard
-│   ├── mqtt-bridge/                ← M2+M10+M12: Kuksa → MQTT + OTel traces
-│   ├── ros2-bridge/                ← M3: Kuksa → ROS2 DDS
-│   ├── ros2-subscriber/            ← M3: ROS2 verification
-│   ├── ai-monitor/                 ← M5+M10+M12: LLM agent + OTel traces
-│   ├── ota-server/                 ← M6: OTA package registry
-│   ├── ota-manager/                ← M6+M10+M12: OTA agent + OTel traces
-│   ├── influxdb-writer/            ← M7: Kuksa → InfluxDB
-│   ├── fleet-simulator/            ← M8: multi-vehicle MQTT + InfluxDB
-│   └── webhook-receiver/           ← M9: Grafana alert webhook sink
+│   ├── ecu-simulator/              ← M4
+│   ├── can-gateway/                ← M4
+│   ├── dashboard/                  ← M1
+│   ├── mqtt-bridge/                ← M2 M10 M12
+│   ├── ros2-bridge/                ← M3
+│   ├── ai-monitor/                 ← M5 M10 M12 (Claude Haiku)
+│   ├── ota-server/                 ← M6
+│   ├── ota-manager/                ← M6 M10 M12
+│   ├── influxdb-writer/            ← M7
+│   ├── fleet-simulator/            ← M8
+│   ├── webhook-receiver/           ← M9
+│   ├── highway-env-bridge/         ← M15
+│   ├── training-dispatcher/        ← M15
+│   ├── alpa-sim/                   ← M16
+│   ├── ai-monitor-edge/            ← M17 (Phi-4-mini ONNX + Pyroscope)
+│   └── scene-search/               ← M17 (LanceDB + all-MiniLM-L6-v2)
+│
+├── scripts/
+│   ├── setup-wsl2.sh               ← M4: SocketCAN bootstrap
+│   ├── generate-certs.sh           ← M10: mTLS CA + client certs
+│   ├── runpod-alpamayo-inference.py ← M16
+│   ├── lora-finetune-dispatch.py   ← M16
+│   ├── quantization-verify.py      ← M16
+│   └── onnx-convert.py             ← M17
+│
+├── tests/                          ← Phase 1: Unit tests (28 tests)
+│   ├── conftest.py
+│   ├── test_m15.py
+│   ├── test_m16.py
+│   ├── test_m17.py
+│   └── test_m18.py
+│
+├── tests_integration/              ← Phase 2+3: Integration & E2E tests
+│   ├── conftest.py
+│   ├── test_m15_int.py             ← highway-env real sim, dispatcher lifecycle
+│   ├── test_m16_int.py             ← IDM evaluation with real highway-env
+│   ├── test_m17_int.py             ← LanceDB persistence, 384-dim embeddings
+│   ├── test_m18_int.py             ← Pyroscope (skip if not running)
+│   ├── test_m16_e2e.py             ← live alpa-sim HTTP (skip if not running)
+│   ├── test_m17_e2e.py             ← live scene-search HTTP (skip if not running)
+│   └── test_m18_e2e.py             ← live Pyroscope + MQTT alerts
+│
+├── config/
+│   ├── certs/                      ← TLS certs (gitignored)
+│   ├── mosquitto/                  ← mTLS + ACL config
+│   ├── grafana/provisioning/       ← datasources, dashboards (InfluxDB/Tempo/Pyroscope)
+│   ├── tempo/tempo.yaml
+│   └── ota/                        ← manifest.json + packages/
 │
 └── docs/
     ├── milestone-{1..14}/          ← PRD / FRD / TRD per milestone
-    └── learning/                   ← architecture_review_m{10..14}.md (English)
+    └── interview/                  ← Word interview docs (M15–M18 + FR001)
 ```
 
 ---

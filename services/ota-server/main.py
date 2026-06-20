@@ -59,8 +59,9 @@ def get_manifest():
 @app.get("/packages/<path:filename>")
 def get_package(filename):
     log.info(f"GET /packages/{filename}")
-    if not filename.endswith(".tar.gz"):
-        abort(400, "Only .tar.gz packages are served")
+    # Allow .tar.gz (config packages) and .pt (policy checkpoint packages, M15)
+    if not (filename.endswith(".tar.gz") or filename.endswith(".pt")):
+        abort(400, "Only .tar.gz and .pt packages are served")
     return send_from_directory(PACKAGES_DIR, filename)
 
 

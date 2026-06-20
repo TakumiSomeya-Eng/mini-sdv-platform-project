@@ -1,0 +1,72 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pyroscope-config
+  namespace: sdv
+data:
+  # Grafana Pyroscope 2.0 minimal config (embedded in env)
+  PYROSCOPE_LOG_LEVEL: "info"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pyroscope
+  namespace: sdv
+  labels:
+    app: pyroscope
+    milestone: m18
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pyroscope
+  template:
+    metadata:
+      labels:
+        app: pyroscope
+    spec:
+      hostNetwork: true
+      dnsPolicy: Default
+      containers:
+        - name: pyroscope
+          image: grafana/pyroscope:2.0.1
+          args:
+            - "-config.file=/etc/pyroscope/config.yaml"
+          ports:
+            - containerPort: 4040
+              hostPort: 4040
+          envFrom:
+            - configMapRef:
+                name: pyroscope-config
+          volumeMounts:
+            - name: pyroscope-config
+              mountPath: /etc/pyroscope
+              readOnly: true
+            - name: pyroscope-data
+              mountPath: /var/lib/pyroscope
+      volumes:
+        - name: pyroscope-config
+          configMap:
+            name: pyroscope-file-config
+        - name: pyroscope-data
+          hostPath:
+            path: /opt/sdv/data/pyroscope
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pyroscope-file-config
+  namespace: sdv
+data:
+  config.yaml: |
+    target: all
+    server:
+      http_listen_port: 4040
+    storage:
+      backend: filesystem
+      filesystem:
+        dir: /var/lib/pyroscope
+    self_profiling:
+      disable_push: true

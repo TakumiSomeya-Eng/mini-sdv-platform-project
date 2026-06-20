@@ -12,3 +12,11 @@ datasources:
         tags:
           - key: vehicle.id
             value: vehicle_id
+      # M18: Trace → Profile correlation (Tempo ↔ Pyroscope)
+      tracesToProfiles:
+        datasourceUid: pyroscope-sdv
+        tags:
+          - key: service.name
+            value: service_name
+        profileTypeId: process_cpu:cpu:nanoseconds:cpu:nanoseconds
+        customQuery: false

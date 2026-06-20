@@ -1,0 +1,124 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 10,
+      "title": "① Metrics  (InfluxDB)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-sdv" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "spanNulls": false
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "id": 1,
+      "title": "ai-monitor-edge Inference Latency (ms)",
+      "description": "Latency spikes here correlate with Tempo traces below. Click a spike → Explore traces.",
+      "type": "timeseries",
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-sdv" },
+          "query": "from(bucket: \"vehicle_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ai_monitor_edge\" and r._field == \"inference_latency_ms\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean)\n  |> yield(name: \"inference_latency_ms\")",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "influxdb-sdv" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+          "unit": "percentunit", "min": 0, "max": 1
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "id": 2,
+      "title": "AI Alert Rate",
+      "description": "Fraction of monitor cycles that triggered an alert (anomaly detected)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-sdv" },
+          "query": "from(bucket: \"vehicle_telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ai_monitor_edge\" and r._field == \"alert_rate\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean)\n  |> yield(name: \"alert_rate\")",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "id": 11,
+      "title": "② Traces  (Grafana Tempo)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "tempo", "uid": "tempo-sdv" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 10 },
+      "id": 3,
+      "title": "ai-monitor-edge Traces — monitor_cycle spans",
+      "description": "Each row = one monitor cycle. Wide rows = slow ONNX inference. Click → full trace.",
+      "type": "traces",
+      "options": {},
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo-sdv" },
+          "queryType": "traceql",
+          "query": "{resource.service.name=\"ai-monitor-edge\"} | select(span.anomaly.severity, span.inference.engine) | duration > 0ms",
+          "refId": "A",
+          "limit": 20
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 },
+      "id": 12,
+      "title": "③ Profiles  (Grafana Pyroscope)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope-sdv" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 21 },
+      "id": 4,
+      "title": "ai-monitor-edge CPU Flamegraph",
+      "description": "CPU flamegraph correlated with latency spikes above. Drill into onnx_inference tag.",
+      "type": "flamegraph",
+      "options": {},
+      "targets": [
+        {
+          "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope-sdv" },
+          "profileTypeId": "process_cpu:cpu:nanoseconds:cpu:nanoseconds",
+          "labelSelector": "{service_name=\"ai-monitor-edge\"}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["sdv", "m18", "profiling", "observability"],
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "title": "3-Signal Correlation — Metrics · Traces · Profiles",
+  "uid": "sdv-profiling-correlation",
+  "version": 1
+}
