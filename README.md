@@ -40,74 +40,11 @@ All vehicle data flows through a central **Vehicle Abstraction Layer (VAL)**. Ap
 
 ## Architecture
 
-### M1–M14: Signal Pipeline & Observability
+![mini-sdv-platform — all 18 milestones](docs/Image_mbvtnumbvtnumbvt.png)
 
-```mermaid
-flowchart LR
-    subgraph wsl["WSL2 — custom kernel 6.18"]
-        ECU["ECU Simulator\nPowertrain / BMS / HVAC"]
-        GW["CAN Gateway\nvcan0 → gRPC"]
-        ECU -->|"CAN 0x100/200/300"| GW
-    end
+**Flywheel loop** (M15 → M16 → M17): HEB collects driving episodes → TD dispatches PPO job to Runpod GPU → ALPA evaluates the trained policy (collision_rate ≤ 5% = OTA gate) → OTAS delivers the checkpoint → AIME runs inference at the edge.
 
-    subgraph k8s["k3s — namespace: sdv"]
-        DB[("Databroker\n:55555")]
-        MB["mqtt-bridge"]
-        AI["ai-monitor\nClaude Haiku"]
-        IW["influxdb-writer"]
-        DASH["dashboard :8501"]
-        MQ["Mosquitto\n:8883 mTLS+ACL"]
-        TP["Tempo :4318"]
-        IDB[("InfluxDB :8086")]
-        GF["Grafana :3000"]
-    end
-
-    GW -->|gRPC| DB
-    DB -->|stream| MB & AI & IW & DASH
-    MB & AI -->|MQTT mTLS| MQ
-    MB & AI -->|OTLP| TP
-    IW -->|write| IDB
-    IDB & TP --> GF
-```
-
-### M15–M18: Autonomy Flywheel
-
-```mermaid
-flowchart LR
-    subgraph sim["Simulation (WSL2)"]
-        HEB["highway-env-bridge\nhighway-v0 CPU"]
-    end
-
-    subgraph k8s["k3s — namespace: sdv"]
-        DB2[("Databroker\n:55555")]
-        MQ2["Mosquitto\n:8883"]
-        AME["ai-monitor-edge\nPhi-4-mini ONNX\nrule fallback"]
-        SS["scene-search\nLanceDB + MiniLM\n:8093"]
-        TD["training-dispatcher\n:8090"]
-        ALPA["alpa-sim\nhighway-v0 eval\n:8092"]
-        PYR["Pyroscope\n:4040"]
-        GF2["Grafana :3000"]
-        OTAS["ota-server :8080"]
-    end
-
-    subgraph ext["External (opt.)"]
-        RP["Runpod\nA100 / RTX 4090"]
-    end
-
-    HEB -->|gRPC VSS| DB2
-    HEB -->|MQTT metrics| MQ2
-    DB2 --> AME
-    MQ2 --> SS
-    MQ2 --> TD
-    TD -->|REST| RP
-    RP -->|checkpoint .pt| OTAS
-    OTAS -.->|OTA| AME
-    ALPA -->|eval policy| RP
-    AME -->|pprof| PYR
-    PYR --> GF2
-```
-
-**Flywheel loop**: highway-env-bridge collects driving episodes → training-dispatcher sends them to Runpod GPU → alpa-sim evaluates the trained policy (collision_rate ≤ 5% = OTA gate) → ota-server delivers the checkpoint → ai-monitor-edge runs inference at the edge.
+> Node label glossary: see [docs/ARCHITECTURE.md § Node abbreviation reference](docs/ARCHITECTURE.md#node-abbreviation-reference).
 
 ---
 
