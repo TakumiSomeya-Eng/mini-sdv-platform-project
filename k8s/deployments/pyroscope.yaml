@@ -32,7 +32,7 @@ spec:
         - name: pyroscope
           image: grafana/pyroscope:2.0.1
           args:
-            - "-config.file=/etc/pyroscope/config.yaml"
+            - "--config.file=/etc/pyroscope/config.yaml"
           ports:
             - containerPort: 4040
               hostPort: 4040
@@ -40,13 +40,13 @@ spec:
             - configMapRef:
                 name: pyroscope-config
           volumeMounts:
-            - name: pyroscope-config
+            - name: pyroscope-file-config
               mountPath: /etc/pyroscope
               readOnly: true
             - name: pyroscope-data
               mountPath: /var/lib/pyroscope
       volumes:
-        - name: pyroscope-config
+        - name: pyroscope-file-config
           configMap:
             name: pyroscope-file-config
         - name: pyroscope-data
