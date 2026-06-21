@@ -25,97 +25,39 @@ Pyroscope (continuous profiling).
 
 ## 2. Component Map
 
-**Interactive diagram** (recommended): open [`docs/architecture.drawio`](architecture.drawio)
-in [diagrams.net](https://app.diagrams.net/) or the VS Code Draw.io extension.
-The `.drawio` file encodes all 18 services with color-coded milestone groups,
-cylinder shapes for databases, dashed edges for OTA pull / OTLP traces, and
-labeled containers for WSL2, k3s, and the Autonomy Flywheel.
+![mini-sdv-platform architecture diagram — all 18 milestones](Image_mbvtnumbvtnumbvt.png)
 
-Color key: dark blue = Databroker (VAL), dark indigo = AI monitors,
-purple = M15–M18 Flywheel, orange = Grafana / ota-server,
-grey = support services.
+**Autonomy Flywheel loop** (M15 → M16 → M17):  
+HEB collects episodes → TD dispatches PPO job to Runpod → ALPA evaluates the
+checkpoint (collision_rate ≤ 5% passes the OTA gate) → OTAS publishes the
+checkpoint → AIME pulls the updated model.
 
-**Static fallback** (GitHub Markdown rendering):
+### Node abbreviation reference
 
-```mermaid
-flowchart LR
-    subgraph wsl["WSL2 — custom kernel 6.18 (SocketCAN)"]
-        ECU["ecu-simulator M4\nPowertrain / BMS / HVAC\nCAN 0x100/200/300"]
-        CGWY["can-gateway M4\nvcan0 -> gRPC"]
-        HEB["highway-env-bridge M15\nhighway-v0 CPU sim\nIDM or Runpod policy"]
-        ECU -->|"CAN frames vcan0"| CGWY
-    end
-
-    subgraph k8s["k3s namespace: sdv (hostNetwork)"]
-        DB[("Databroker M1\nKuksa 0.4.4\n:55555")]
-        DASH["dashboard M1\nStreamlit :8501"]
-        MB["mqtt-bridge M2\nV2C gateway + OTel"]
-        ROS["ros2-bridge M3\nDDS / CycloneDDS"]
-        AIM["ai-monitor M5\nClaude Haiku\nObserve-Reason-Act"]
-        OTAS["ota-server M6\nFlask :8080\nSHA-256 UPTANE"]
-        OTAM["ota-manager M6\nOTA agent + OTel"]
-        IW["influxdb-writer M7\nKuksa -> InfluxDB"]
-        FS["fleet-simulator M8\nmulti-vehicle threads"]
-        WH["webhook-receiver M9\n:9000 alert sink"]
-        MQ["Mosquitto M2/M10/M11\n:8883 mTLS + ACL"]
-        IDB[("InfluxDB M7\n:8086")]
-        GF["Grafana M7/M13/M18\n:3000"]
-        TP["Tempo M13\n:4318 OTLP :3200"]
-        TD["training-dispatcher M15\nFlask :8090"]
-        ALPA["alpa-sim M16\nhighway-v0 eval\n:8092 OTA gate"]
-        AIME["ai-monitor-edge M17\nPhi-4-mini ONNX\nrule fallback"]
-        SS["scene-search M17\nLanceDB + MiniLM\n:8093"]
-        PYR["Pyroscope M18\n:4040"]
-    end
-
-    subgraph ext["External (optional)"]
-        RP["Runpod\nA100 / RTX 4090\nPPO + LoRA"]
-    end
-
-    CGWY -->|gRPC VSS| DB
-    HEB  -->|gRPC VSS| DB
-    HEB  -->|MQTT CAN frames + metrics| MQ
-
-    DB --> DASH
-    DB --> MB
-    DB --> AIM
-    DB --> IW
-    DB --> AIME
-    DB --> ROS
-
-    MB  -->|MQTT mTLS| MQ
-    AIM -->|MQTT mTLS| MQ
-    MB  -->|OTLP| TP
-    AIM -->|OTLP| TP
-    OTAM -->|OTLP| TP
-    AIME -->|OTLP| TP
-    AIME -->|pprof| PYR
-
-    MQ --> SS
-    MQ --> TD
-
-    IW -->|write| IDB
-    FS -->|write| IDB
-    ALPA -->|write| IDB
-
-    IDB --> GF
-    TP  --> GF
-    PYR --> GF
-
-    GF -->|alert webhook| WH
-
-    TD  -->|REST Serverless API| RP
-    RP  -->|checkpoint .pt| OTAS
-    OTAS -.->|OTA pull| OTAM
-    OTAS -.->|OTA pull| AIME
-    ALPA -->|eval via REST| RP
-```
-
-**Autonomy Flywheel loop** (M15 -> M16 -> M17):
-highway-env-bridge collects episodes -> training-dispatcher dispatches PPO job
-to Runpod -> alpa-sim evaluates the checkpoint (collision_rate <= 5% passes the
-OTA gate) -> ota-server publishes the checkpoint -> ai-monitor-edge pulls the
-updated model.
+| Abbr. | Full service name | Milestone | Role |
+|-------|-------------------|-----------|------|
+| ECU | ecu-simulator | M4 | Generates synthetic CAN frames (Powertrain / BMS / HVAC) on vcan0 |
+| CGWY | can-gateway | M4 | Reads vcan0 via python-can, translates to VSS, writes to Databroker over gRPC |
+| HEB | highway-env-bridge | M15 | Runs highway-v0 Gymnasium sim; publishes VSS signals and MQTT episode metrics |
+| DB | Kuksa Databroker | M1 | Vehicle Abstraction Layer — named VSS signal store (gRPC :55555) |
+| DASH | dashboard | M1 | Streamlit live vehicle dashboard (:8501) |
+| MB | mqtt-bridge | M2 | V2C gateway; subscribes to Databroker, publishes to Mosquitto; emits OTel traces |
+| ROS | ros2-bridge | M3 | DDS / CycloneDDS bridge between Databroker and ROS 2 topics |
+| AIM | ai-monitor | M5 | Cloud AI anomaly monitor (Claude Haiku, Observe-Reason-Act loop) |
+| MQ | Mosquitto | M2/M10/M11 | MQTT broker with mTLS + ACL (:8883) — event bus for all inter-service messages |
+| IW | influxdb-writer | M7 | Polls Databroker every second, writes VSS readings to InfluxDB |
+| IDB | InfluxDB | M7 | Time-series database for vehicle telemetry and eval results (:8086) |
+| GF | Grafana | M7/M13/M18 | Dashboards, alert rules, datasources for InfluxDB / Tempo / Pyroscope (:3000) |
+| WH | webhook-receiver | M9 | HTTP sink for Grafana alert webhooks (:9000) |
+| TP | Tempo | M13 | Distributed trace backend; receives OTLP spans (:4318), queried by Grafana (:3200) |
+| AIME | ai-monitor-edge | M17 | On-device AI monitor (Phi-4-mini ONNX, rule-based fallback when model absent) |
+| PYR | Pyroscope | M18 | Continuous CPU/memory profiling backend; receives pprof pushes (:4040) |
+| FS | fleet-simulator | M8 | Simulates multiple vehicles in parallel; writes telemetry directly to InfluxDB |
+| OTAS | ota-server | M6 | OTA package registry (Flask :8080, SHA-256 manifest, UPTANE pattern) |
+| OTAM | ota-manager | M6 | OTA agent inside the vehicle; polls ota-server, applies updates, emits OTel traces |
+| TD | training-dispatcher | M15 | Dispatches PPO training jobs to Runpod Serverless API (Flask :8090); dry-run mode when credentials absent |
+| ALPA | alpa-sim | M16 | Evaluation harness; runs highway-v0 against a checkpoint, gates OTA on collision_rate ≤ 5% (:8092) |
+| SS | scene-search | M17 | Semantic scene retrieval; encodes MQTT episode metrics with MiniLM → LanceDB vector store (:8093) |
 
 ---
 
