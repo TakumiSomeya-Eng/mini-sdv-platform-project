@@ -1,0 +1,439 @@
+<mxGraphModel dx="1422" dy="762" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="950" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+
+    <!-- ═══════════════════════════════════════════════════════ CONTAINERS -->
+
+    <!-- WSL2 -->
+    <mxCell id="2" value="WSL2 — Ubuntu 24.04 | Custom Kernel 6.18 (SocketCAN)"
+      style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;verticalAlign=top;arcSize=3;opacity=50;"
+      vertex="1" parent="1">
+      <mxGeometry x="10" y="80" width="305" height="390" as="geometry" />
+    </mxCell>
+
+    <!-- k3s -->
+    <mxCell id="3" value="k3s — namespace: sdv  (hostNetwork: true)"
+      style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;verticalAlign=top;arcSize=2;opacity=50;"
+      vertex="1" parent="1">
+      <mxGeometry x="355" y="10" width="980" height="910" as="geometry" />
+    </mxCell>
+
+    <!-- Signal Pipeline sub-box -->
+    <mxCell id="4" value="Signal Pipeline — M1–M14"
+      style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontStyle=1;verticalAlign=top;arcSize=3;opacity=70;"
+      vertex="1" parent="1">
+      <mxGeometry x="375" y="55" width="940" height="550" as="geometry" />
+    </mxCell>
+
+    <!-- Autonomy Flywheel sub-box -->
+    <mxCell id="5" value="Autonomy Flywheel — M15–M18"
+      style="rounded=1;whiteSpace=wrap;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;verticalAlign=top;arcSize=3;opacity=70;"
+      vertex="1" parent="1">
+      <mxGeometry x="375" y="625" width="940" height="285" as="geometry" />
+    </mxCell>
+
+    <!-- External -->
+    <mxCell id="6" value="External (optional)"
+      style="rounded=1;whiteSpace=wrap;fillColor=#fffde7;strokeColor=#f9a825;fontSize=11;fontStyle=1;verticalAlign=top;arcSize=3;opacity=50;"
+      vertex="1" parent="1">
+      <mxGeometry x="1360" y="280" width="295" height="225" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════════ WSL2 NODES -->
+
+    <!-- ecu-simulator M4 -->
+    <mxCell id="10" value="ecu-simulator M4&#xa;Powertrain / BMS / HVAC&#xa;CAN 0x100 / 0x200 / 0x300"
+      style="rounded=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="28" y="125" width="268" height="65" as="geometry" />
+    </mxCell>
+
+    <!-- can-gateway M4 -->
+    <mxCell id="11" value="can-gateway M4&#xa;vcan0 → gRPC VSS"
+      style="rounded=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="28" y="215" width="268" height="60" as="geometry" />
+    </mxCell>
+
+    <!-- highway-env-bridge M15 -->
+    <mxCell id="12" value="highway-env-bridge M15&#xa;highway-v0 CPU sim&#xa;IDM heuristic / Runpod policy"
+      style="rounded=1;whiteSpace=wrap;fillColor=#9673a6;strokeColor=#6a1b9a;fontColor=#ffffff;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="28" y="300" width="268" height="80" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════════ SIGNAL PIPELINE -->
+
+    <!-- Databroker M1 (cylinder) -->
+    <mxCell id="20" value="Databroker M1&#xa;Kuksa 0.4.4  :55555"
+      style="shape=mxgraph.flowchart.database;whiteSpace=wrap;fillColor=#023d8a;strokeColor=#001d45;fontColor=#ffffff;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="390" y="100" width="175" height="90" as="geometry" />
+    </mxCell>
+
+    <!-- dashboard M1 -->
+    <mxCell id="21" value="dashboard M1&#xa;Streamlit :8501"
+      style="rounded=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="600" y="88" width="160" height="55" as="geometry" />
+    </mxCell>
+
+    <!-- mqtt-bridge M2 -->
+    <mxCell id="22" value="mqtt-bridge M2&#xa;V2C gateway + OTel"
+      style="rounded=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="600" y="158" width="160" height="55" as="geometry" />
+    </mxCell>
+
+    <!-- ros2-bridge M3 -->
+    <mxCell id="23" value="ros2-bridge M3&#xa;DDS / CycloneDDS"
+      style="rounded=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="600" y="228" width="160" height="55" as="geometry" />
+    </mxCell>
+
+    <!-- ai-monitor M5 -->
+    <mxCell id="24" value="ai-monitor M5&#xa;Claude Haiku&#xa;Observe-Reason-Act"
+      style="rounded=1;whiteSpace=wrap;fillColor=#1a237e;strokeColor=#0d1452;fontColor=#ffffff;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="600" y="298" width="160" height="65" as="geometry" />
+    </mxCell>
+
+    <!-- ota-manager M6 -->
+    <mxCell id="25" value="ota-manager M6&#xa;OTA agent + OTel"
+      style="rounded=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="600" y="378" width="160" height="60" as="geometry" />
+    </mxCell>
+
+    <!-- influxdb-writer M7 -->
+    <mxCell id="26" value="influxdb-writer M7&#xa;Kuksa → InfluxDB"
+      style="rounded=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="600" y="453" width="160" height="55" as="geometry" />
+    </mxCell>
+
+    <!-- Mosquitto M2/M10/M11 -->
+    <mxCell id="27" value="Mosquitto M2/M10/M11&#xa;:8883  mTLS + ACL"
+      style="rounded=1;whiteSpace=wrap;fillColor=#4a148c;strokeColor=#1a0033;fontColor=#ffffff;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="805" y="88" width="165" height="75" as="geometry" />
+    </mxCell>
+
+    <!-- ota-server M6 -->
+    <mxCell id="28" value="ota-server M6&#xa;Flask :8080&#xa;SHA-256 UPTANE"
+      style="rounded=1;whiteSpace=wrap;fillColor=#bf360c;strokeColor=#7f1a00;fontColor=#ffffff;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="805" y="178" width="165" height="70" as="geometry" />
+    </mxCell>
+
+    <!-- fleet-simulator M8 -->
+    <mxCell id="29" value="fleet-simulator M8&#xa;multi-vehicle threads"
+      style="rounded=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="805" y="263" width="165" height="55" as="geometry" />
+    </mxCell>
+
+    <!-- webhook-receiver M9 -->
+    <mxCell id="30" value="webhook-receiver M9&#xa;:9000  alert sink"
+      style="rounded=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="805" y="333" width="165" height="55" as="geometry" />
+    </mxCell>
+
+    <!-- InfluxDB M7 (cylinder) -->
+    <mxCell id="31" value="InfluxDB M7&#xa;:8086"
+      style="shape=mxgraph.flowchart.database;whiteSpace=wrap;fillColor=#22ADF6;strokeColor=#0078c2;fontColor=#ffffff;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="1015" y="88" width="160" height="80" as="geometry" />
+    </mxCell>
+
+    <!-- Grafana M7/M13/M18 -->
+    <mxCell id="32" value="Grafana M7/M13/M18&#xa;:3000"
+      style="rounded=1;whiteSpace=wrap;fillColor=#F46800;strokeColor=#b34e00;fontColor=#ffffff;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="1015" y="183" width="160" height="65" as="geometry" />
+    </mxCell>
+
+    <!-- Tempo M13 -->
+    <mxCell id="33" value="Tempo M13&#xa;:4318 OTLP  :3200"
+      style="rounded=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="1015" y="263" width="160" height="60" as="geometry" />
+    </mxCell>
+
+    <!-- Pyroscope M18 -->
+    <mxCell id="34" value="Pyroscope M18&#xa;:4040"
+      style="rounded=1;whiteSpace=wrap;fillColor=#FF6B35;strokeColor=#cc4a10;fontColor=#ffffff;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="1015" y="338" width="160" height="60" as="geometry" />
+    </mxCell>
+
+    <!-- ══════════════════════════════════════════════ AUTONOMY FLYWHEEL -->
+
+    <!-- training-dispatcher M15 -->
+    <mxCell id="40" value="training-dispatcher M15&#xa;Flask :8090&#xa;PPO dispatch → Runpod"
+      style="rounded=1;whiteSpace=wrap;fillColor=#6a1b9a;strokeColor=#38006b;fontColor=#ffffff;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="390" y="665" width="185" height="100" as="geometry" />
+    </mxCell>
+
+    <!-- alpa-sim M16 -->
+    <mxCell id="41" value="alpa-sim M16&#xa;highway-v0 eval&#xa;:8092  OTA gate"
+      style="rounded=1;whiteSpace=wrap;fillColor=#6a1b9a;strokeColor=#38006b;fontColor=#ffffff;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="605" y="665" width="185" height="100" as="geometry" />
+    </mxCell>
+
+    <!-- ai-monitor-edge M17 -->
+    <mxCell id="42" value="ai-monitor-edge M17&#xa;Phi-4-mini ONNX&#xa;rule fallback"
+      style="rounded=1;whiteSpace=wrap;fillColor=#1a237e;strokeColor=#0d1452;fontColor=#ffffff;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="820" y="665" width="185" height="100" as="geometry" />
+    </mxCell>
+
+    <!-- scene-search M17 -->
+    <mxCell id="43" value="scene-search M17&#xa;LanceDB + MiniLM&#xa;:8093"
+      style="rounded=1;whiteSpace=wrap;fillColor=#6a1b9a;strokeColor=#38006b;fontColor=#ffffff;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="1035" y="665" width="185" height="100" as="geometry" />
+    </mxCell>
+
+    <!-- ════════════════════════════════════════════════════════ EXTERNAL -->
+
+    <!-- Runpod -->
+    <mxCell id="50" value="Runpod&#xa;A100 / RTX 4090&#xa;PPO + LoRA training"
+      style="rounded=1;whiteSpace=wrap;fillColor=#1a1a2e;strokeColor=#000000;fontColor=#ffffff;fontSize=10;"
+      vertex="1" parent="1">
+      <mxGeometry x="1378" y="315" width="255" height="115" as="geometry" />
+    </mxCell>
+
+    <!-- ══════════════════════════════════════════════════════════ EDGES -->
+
+    <!-- ECU → can-gateway  (CAN frames vcan0) -->
+    <mxCell id="100" value="CAN frames&#xa;vcan0"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;"
+      edge="1" source="10" target="11" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- can-gateway → Databroker  (gRPC VSS) -->
+    <mxCell id="101" value="gRPC VSS"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;"
+      edge="1" source="11" target="20" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- highway-env-bridge → Databroker  (gRPC VSS) -->
+    <mxCell id="102" value="gRPC VSS"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="12" target="20" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- highway-env-bridge → Mosquitto  (MQTT metrics) -->
+    <mxCell id="103" value="MQTT metrics"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="12" target="27" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Databroker → dashboard -->
+    <mxCell id="104" value=""
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="20" target="21" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Databroker → mqtt-bridge -->
+    <mxCell id="105" value=""
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="20" target="22" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Databroker → ros2-bridge -->
+    <mxCell id="106" value=""
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="20" target="23" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Databroker → ai-monitor -->
+    <mxCell id="107" value=""
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="20" target="24" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Databroker → ota-manager -->
+    <mxCell id="108" value=""
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="20" target="25" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Databroker → influxdb-writer -->
+    <mxCell id="109" value=""
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="20" target="26" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Databroker → ai-monitor-edge -->
+    <mxCell id="110" value=""
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="20" target="42" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- mqtt-bridge → Mosquitto  (MQTT mTLS) -->
+    <mxCell id="111" value="MQTT mTLS"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="22" target="27" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ai-monitor → Mosquitto  (MQTT mTLS) -->
+    <mxCell id="112" value="MQTT mTLS"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="24" target="27" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- mqtt-bridge → Tempo  (OTLP, dashed) -->
+    <mxCell id="113" value="OTLP"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;dashed=1;endArrow=open;endFill=0;"
+      edge="1" source="22" target="33" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ai-monitor → Tempo  (OTLP, dashed) -->
+    <mxCell id="114" value="OTLP"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;dashed=1;endArrow=open;endFill=0;"
+      edge="1" source="24" target="33" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ota-manager → Tempo  (OTLP, dashed) -->
+    <mxCell id="115" value="OTLP"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;dashed=1;endArrow=open;endFill=0;"
+      edge="1" source="25" target="33" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ai-monitor-edge → Tempo  (OTLP, dashed) -->
+    <mxCell id="116" value="OTLP"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;dashed=1;endArrow=open;endFill=0;"
+      edge="1" source="42" target="33" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ai-monitor-edge → Pyroscope  (pprof) -->
+    <mxCell id="117" value="pprof"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="42" target="34" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Mosquitto → scene-search  (MQTT sub) -->
+    <mxCell id="118" value="MQTT sub"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="27" target="43" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Mosquitto → training-dispatcher  (MQTT events) -->
+    <mxCell id="119" value="MQTT events"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="27" target="40" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- influxdb-writer → InfluxDB  (write) -->
+    <mxCell id="120" value="write"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="26" target="31" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- fleet-simulator → InfluxDB  (write) -->
+    <mxCell id="121" value="write"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="29" target="31" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- alpa-sim → InfluxDB  (eval results) -->
+    <mxCell id="122" value="eval results"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="41" target="31" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- InfluxDB → Grafana -->
+    <mxCell id="123" value=""
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="31" target="32" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Tempo → Grafana -->
+    <mxCell id="124" value=""
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="33" target="32" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Pyroscope → Grafana -->
+    <mxCell id="125" value=""
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="34" target="32" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Grafana → webhook-receiver  (alert webhook) -->
+    <mxCell id="126" value="alert webhook"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="32" target="30" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- training-dispatcher → Runpod  (REST Serverless API) -->
+    <mxCell id="127" value="REST Serverless API"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="40" target="50" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- alpa-sim → Runpod  (eval via REST) -->
+    <mxCell id="128" value="eval via REST"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="41" target="50" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Runpod → ota-server  (checkpoint .pt) -->
+    <mxCell id="129" value="checkpoint .pt"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;"
+      edge="1" source="50" target="28" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ota-server → ota-manager  (OTA pull, dashed) -->
+    <mxCell id="130" value="OTA pull"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;dashed=1;endArrow=open;endFill=0;"
+      edge="1" source="28" target="25" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ota-server → ai-monitor-edge  (OTA pull, dashed) -->
+    <mxCell id="131" value="OTA pull"
+      style="edgeStyle=orthogonalEdgeStyle;fontSize=9;dashed=1;endArrow=open;endFill=0;"
+      edge="1" source="28" target="42" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+  </root>
+</mxGraphModel>

@@ -25,8 +25,17 @@ Pyroscope (continuous profiling).
 
 ## 2. Component Map
 
-The diagram below covers all 18 milestones in one unified view. Nodes are
-labeled with their milestone tag; data-flow direction follows the arrows.
+**Interactive diagram** (recommended): open [`docs/architecture.drawio`](architecture.drawio)
+in [diagrams.net](https://app.diagrams.net/) or the VS Code Draw.io extension.
+The `.drawio` file encodes all 18 services with color-coded milestone groups,
+cylinder shapes for databases, dashed edges for OTA pull / OTLP traces, and
+labeled containers for WSL2, k3s, and the Autonomy Flywheel.
+
+Color key: dark blue = Databroker (VAL), dark indigo = AI monitors,
+purple = M15–M18 Flywheel, orange = Grafana / ota-server,
+grey = support services.
+
+**Static fallback** (GitHub Markdown rendering):
 
 ```mermaid
 flowchart LR
