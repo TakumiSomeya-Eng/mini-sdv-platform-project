@@ -25,7 +25,7 @@ Pyroscope (continuous profiling).
 
 ## 2. Component Map
 
-![mini-sdv-platform architecture diagram — all 18 milestones](Image_mbvtnumbvtnumbvt.png)
+![mini-sdv-platform architecture diagram — all 18 milestones](Image_System.png)
 
 **Autonomy Flywheel loop** (M15 → M16 → M17):  
 HEB collects episodes → TD dispatches PPO job to Runpod → ALPA evaluates the

@@ -40,7 +40,7 @@ All vehicle data flows through a central **Vehicle Abstraction Layer (VAL)**. Ap
 
 ## Architecture
 
-![mini-sdv-platform — all 18 milestones](docs/Image_mbvtnumbvtnumbvt.png)
+![mini-sdv-platform — all 18 milestones](docs/Image_System.png)
 
 **Flywheel loop** (M15 → M16 → M17): HEB collects driving episodes → TD dispatches PPO job to Runpod GPU → ALPA evaluates the trained policy (collision_rate ≤ 5% = OTA gate) → OTAS delivers the checkpoint → AIME runs inference at the edge.
 
